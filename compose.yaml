@@ -1,32 +1,21 @@
+# 本地构建版：同样只需要改「端口」和「路径」，其余首次运行自动创建。
+#
+#   docker compose up -d --build
+#   docker compose logs subtitle | grep -A6 "首次启动"
+#
 services:
   subtitle:
     build: .
+    image: nas-subtitle-pipeline:local
+    container_name: nas-subtitle
     restart: unless-stopped
     ports:
-      # 只监听回环，内网其它机器要访问就把 127.0.0.1 改成 0.0.0.0 或指定内网 IP
-      - "127.0.0.1:8000:8000"
-    environment:
-      MEDIA_ROOT: /media
-      DATA_DIR: /data
-      WEB_USER: admin
-      WEB_PASSWORD: ${WEB_PASSWORD:?Set WEB_PASSWORD in .env}
-      # 翻译接口留空即可，启动后到 Web UI「设置」里填。项目不含任何密钥。
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # 并发默认 1，跑顺了再往上加
-      ASR_WORKERS: ${ASR_WORKERS:-1}
-      TRANSLATE_WORKERS: ${TRANSLATE_WORKERS:-1}
-      EXTRACT_WORKERS: ${EXTRACT_WORKERS:-1}
-      # 限流：保护上游不被刷爆
-      TRANSLATE_RPM: ${TRANSLATE_RPM:-20}
-      TRANSLATE_MIN_INTERVAL: ${TRANSLATE_MIN_INTERVAL:-3}
-      DAILY_CHAR_BUDGET: ${DAILY_CHAR_BUDGET:-0}
-      TZ: Asia/Shanghai
+      # ① 端口：冒号左边是 NAS 上访问用的端口，被占用就改成 8001 / 9000……
+      - "8000:8000"
     volumes:
-      # 必须可写：字幕要写在影片同目录（片名.zh-CN.srt）。
-      # 程序只会创建/覆盖 *.srt 文件，永不改动视频本身（subtitles.atomic_write 有后缀白名单）。
-      - ${MEDIA_DIR:?Set MEDIA_DIR in .env}:/media
+      # ② 路径：冒号左边换成你自己的影片目录。
+      #    必须可写——字幕写在影片同目录（片名.zh-CN.srt），程序只创建 *.srt，不动视频。
+      - /volume1/video:/media
+      # 数据目录：数据库、模型、登录口令都在这。目录不存在会自动建，删掉等于重装。
       - ./data:/data
-    # 长跑项目：给足时间优雅退出，避免半个字幕文件
     stop_grace_period: 60s

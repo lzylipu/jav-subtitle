@@ -8,7 +8,7 @@
 - 已有中文字幕自动跳过，不会覆盖
 - 单文件处理：`片名.mkv` + `片名.zh-CN.srt`，同目录并列
 - 适合**一次性几百到几千部**的长跑场景，崩了重启能续上
-- 支持纯 CPU（无核显）运行
+- **GPU 自动识别**：有可用的 NVIDIA 显卡就用 GPU 转写，没有就回退 CPU；不需要改配置，网页上能看到实际用的是哪个
 
 > 本项目**不包含任何 API 密钥**。翻译接口地址、模型、密钥全部在网页上填，只存在你本地数据库里。
 
@@ -27,23 +27,32 @@
 
 ---
 
-## 🚀 三步部署
+## 🚀 部署：只改端口和路径
+
+整个部署只需要改**两行**——端口和影片目录。其余（登录口令、数据库、模型目录、翻译接口、并发、限流）全部**首次运行自动创建**，之后在 Web UI 里配。
 
 ### 方式 A：拉现成镜像（不构建，最快）
 
-镜像由 GitHub Actions 自动构建推送，改代码即自动出新的 `latest`。
+```bash
+mkdir -p /opt/nas-subtitle && cd /opt/nas-subtitle
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+```
+
+打开 `compose.image.yaml`，只改这两处：
+
+```yaml
+    ports:
+      - "8000:8000"                 # ① 左边换成你要用的端口
+    volumes:
+      - /volume1/video:/media       # ② 左边换成你的影片目录
+```
 
 ```bash
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/.env.example
-
-mv .env.example .env
-# 只改两行：
-#   MEDIA_DIR=/volume1/video     ← 你放影片的目录
-#   WEB_PASSWORD=你想设的密码
-
 docker compose -f compose.image.yaml up -d
+docker compose -f compose.image.yaml logs subtitle | grep -A6 首次启动
 ```
+
+日志里会打印首次启动自动生成的登录口令（形如 `用户名：admin  密码：xxxxxxxx`），同时写进 `./data/admin-password.txt`，重启不会变。
 
 | 仓库 | 地址 |
 |---|---|
@@ -53,18 +62,25 @@ docker compose -f compose.image.yaml up -d
 ### 方式 B：本地构建
 
 ```bash
-git clone <本仓库>
+git clone https://github.com/lzylipu/nas-subtitle-pipeline.git
 cd nas-subtitle-pipeline
-
-cp .env.example .env
-# 同样只改 MEDIA_DIR 和 WEB_PASSWORD
-
+# 同样只改 compose.yaml 里的端口和路径
 docker compose up -d --build
+docker compose logs subtitle | grep -A6 首次启动
 ```
 
-打开 `http://<NAS地址>:8000`，浏览器会弹 Basic 登录框，用户名 `admin`，密码就是 `WEB_PASSWORD`。
+### 首次启动会自动创建什么
 
-首次启动会自动下载 whisper 模型（`small` 约 460MB）到 `./data/models`，走 `HF_HOME`，国内建议先配镜像源。
+| 自动创建 | 位置 |
+|---|---|
+| 登录口令 | `./data/admin-password.txt`（`WEB_PASSWORD` 环境变量优先） |
+| 数据库（全部设置、任务、翻译记忆） | `./data/pipeline.db` |
+| whisper 模型 | `./data/models`（首次下 460MB） |
+| 音频中间文件 | `./data/audio` |
+
+想换口令：改 `./data/admin-password.txt` 里的那一行，`docker compose restart` 即可。想彻底重来：停容器后删 `./data`。
+
+首次启动会自动下载 whisper 模型（`small` 约 460MB），国内建议加环境变量 `HF_ENDPOINT=https://hf-mirror.com`。
 
 ---
 
@@ -129,7 +145,8 @@ docker compose up -d --build
 | 阶段 | 瓶颈 | 建议并发 |
 |---|---|---|
 | 抽音频 | 磁盘 IO | 1–2 |
-| 转写 | **CPU**，占满所有核 | 核数 ÷ 1（4 核就 1） |
+| 转写（CPU） | **CPU**，占满所有核 | 核数 ÷ 1（4 核就 1） |
+| 转写（GPU） | 显存 / 显卡算力 | 1–2，显存够再往上 |
 | 翻译 | **网络等待**，CPU 几乎不动 | 受上游限流约束，不是受机器约束 |
 
 ---
@@ -205,16 +222,42 @@ curl -X POST -H "Authorization: Bearer hs_xxx" \
 
 ---
 
-## 🖥 纯 CPU（E3-1231v3 这类）的现实
+## 🖥 硬件：GPU 优先，CPU 兜底
+
+程序每次启动都会探测一次硬件，结果在「设置 → 转写」顶部那行字里显示：
+
+```
+当前会使用：CPU ｜ 精度 int8 ｜ 线程 4 ｜ 机器 8 线程
+自动识别未发现可用 CUDA 设备，使用 CPU
+```
+
+| 场景 | 结果 |
+|---|---|
+| 有 NVIDIA 显卡 + `:latest-cuda` 镜像 + 容器挂了 GPU | 自动用 GPU，精度 `float16` |
+| 有显卡但用的是 CPU 镜像 | 探测不到 CUDA 库 → 回退 CPU（不会崩） |
+| 显卡显存 < 4GB | 自动降到 `int8_float16`，防 OOM |
+| 完全没有显卡（E3-1231v3 这类） | CPU + `int8`，线程数自动取 `min(4, 核数)` |
+| 手动在网页上选「强制 GPU」但没显卡 | 回退 CPU，并在那行字里写明原因 |
+
+`device` 和 `compute_type` 的默认值都是 `auto`，一般不用动。
+
+### 纯 CPU 的现实（E3-1231v3 这类）
 
 | 项 | 说明 |
 |---|---|
 | 模型 | `small` + `int8` 是 4 核机器的合理选择；`medium` 大概慢 2.5–3 倍 |
 | 转写速度 | 参考实测：2 vCPU 上 5× 实时；4 核 8 线程预计 10–18× 实时（**需真机实测**） |
 | 内存 | `small`+int8 单实例约 500MB–1GB，转写并发开 2 就要翻倍 |
-| 线程数 | `cpu_threads` 设成物理核数，多了反而互相抢 |
+| 线程数 | 默认自动（`min(4, 核数)`）；想手动压就填具体数字，0 表示自动 |
 | 批推理 | 默认关。实测只快 34%，却会把 30 句并成 5 条 35 秒长字幕，**时间轴毁了** |
 | 厚度 | 一部 90 分钟片：转写约 5–9 分钟，翻译取决于接口 |
+
+### 想用显卡
+
+1. 宿主机装好 NVIDIA 驱动 + nvidia-container-toolkit
+2. 镜像换成 `:latest-cuda`
+3. `compose.image.yaml` 里取消 `deploy:` 那段注释
+4. 启动后看「设置 → 转写」那行字，确认写的是 `GPU：显卡型号`
 
 真机上一条命令就能量出准数：
 
@@ -229,7 +272,7 @@ docker compose exec subtitle python tools/bench.py /media/某部片.mp4
 - Python 3.12 + FastAPI + Uvicorn
 - SQLite（WAL）+ `BEGIN IMMEDIATE` 原子领取任务，重启不丢队列
 - FFmpeg 抽音轨（16k 单声道 PCM）
-- faster-whisper（CTranslate2，纯 CPU int8）
+- faster-whisper（CTranslate2；有 GPU 用 GPU `float16`，没有用 CPU `int8`，运行时自动判定）
 - httpx 调 OpenAI 兼容接口，JSON 结构化返回，二分拆分隔离毒批次
 - 单文件前端（无构建步骤），轮询刷新
 
@@ -248,10 +291,10 @@ nas-subtitle-v3/
 │   ├── subtitles.py    # SRT 解析/渲染/原子写
 │   ├── main.py         # HTTP 控制面（Basic + Bearer 双鉴权）
 │   └── static/index.html
-├── tests/              # 31 项单元测试
+├── tests/              # 41 项单元测试
 ├── tools/bench.py      # 实机吞吐基准
-├── .env.example
-├── compose.yaml
+├── compose.yaml        # 本地构建版（只含端口 + 路径）
+├── compose.image.yaml  # 拉现成镜像版
 └── Dockerfile
 ```
 

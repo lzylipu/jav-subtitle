@@ -18,8 +18,8 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import pipeline
-from .config import Settings, settings_from_env
+from . import asr, pipeline
+from .config import DATA_DIR, Settings, settings_from_env
 from .db import (
     add_event, connect, init_db, job_events, load_settings, save_settings,
 )
@@ -37,6 +37,79 @@ def _bearer(request: Request) -> str:
     return ""
 
 
+PASSWORD_FILE = DATA_DIR / "admin-password.txt"
+_web_auth: tuple[str, str] | None = None
+_web_auth_source: str = ""
+
+
+def _read_password_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _write_password_file(path: Path, password: str) -> None:
+    """0600 + 原子替换，和字幕写入同一套写法。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(password + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def web_credentials() -> tuple[str, str]:
+    """登录口令。WEB_PASSWORD 没配就自动生成一次、落盘复用，重启不变。
+
+    设计上「第一次运行自动创建，其余全进 Web UI 配」：
+    缺口令不能当成致命错误拒绝启动，否则用户只想跑起来看看都做不到。
+    """
+    global _web_auth, _web_auth_source
+    if _web_auth is not None:
+        return _web_auth
+
+    user = (os.getenv("WEB_USER") or "admin").strip() or "admin"
+    env_password = (os.getenv("WEB_PASSWORD") or "").strip()
+    if env_password:
+        _web_auth, _web_auth_source = (user, env_password), "env"
+        return _web_auth
+
+    existing = _read_password_file(PASSWORD_FILE)
+    if existing:
+        _web_auth, _web_auth_source = (user, existing), "file"
+        return _web_auth
+
+    password = secrets.token_urlsafe(12)
+    try:
+        _write_password_file(PASSWORD_FILE, password)
+        source = "new"
+    except OSError:
+        # 数据目录不可写也别挡住启动，至少本次运行能登进去。
+        source = "memory"
+    _web_auth, _web_auth_source = (user, password), source
+    return _web_auth
+
+
+def web_password_source() -> str:
+    return _web_auth_source
+
+
+def reset_web_credentials() -> None:
+    """测试与「删掉口令文件后重载」用。"""
+    global _web_auth, _web_auth_source
+    _web_auth, _web_auth_source = None, ""
+
+
 def authorized(request: Request,
                credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
     """Basic 或 Bearer 任一通过即可。只读 token 不能改状态。"""
@@ -47,12 +120,12 @@ def authorized(request: Request,
             raise HTTPException(403, "该 API token 是只读的，不允许执行写操作")
         return
 
-    password = os.getenv("WEB_PASSWORD", "")
+    user, password = web_credentials()
     if not password:
         return
     if (credentials is None
             or not secrets.compare_digest(credentials.password, password)
-            or not secrets.compare_digest(credentials.username, os.getenv("WEB_USER", "admin"))):
+            or not secrets.compare_digest(credentials.username, user)):
         raise HTTPException(401, "未授权", headers={"WWW-Authenticate": "Basic"})
 
 
@@ -94,9 +167,21 @@ def ensure_api_token() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not os.getenv("WEB_PASSWORD"):
-        raise RuntimeError("必须配置 WEB_PASSWORD 才能启动服务")
     os.umask(0o077)
+    user, password = web_credentials()
+    source = web_password_source()
+    if source == "new":
+        bar = "=" * 66
+        print(f"\n{bar}\n"
+              f"  首次启动，已自动生成 Web 登录口令（以后重启不变）\n"
+              f"  用户名：{user}\n"
+              f"  密  码：{password}\n"
+              f"  已写入：{PASSWORD_FILE}\n"
+              f"  想换口令：改这个文件，或设置 WEB_PASSWORD 环境变量后重启\n"
+              f"{bar}\n", flush=True)
+    elif source == "memory":
+        print(f"\n[警告] 数据目录不可写，本次登录口令仅存在于内存：\n"
+              f"  用户名：{user}  密码：{password}\n", flush=True)
     init_db()
     with connect() as conn:
         if not conn.execute("SELECT 1 FROM settings WHERE key='main'").fetchone():
@@ -120,6 +205,7 @@ app = FastAPI(title="NAS 日中字幕流水线", lifespan=lifespan,
 class SettingsPatch(BaseModel):
     media_root: str | None = None
     whisper_model: str | None = None
+    device: str | None = None
     compute_type: str | None = None
     cpu_threads: int | None = None
     beam_size: int | None = None
@@ -186,15 +272,26 @@ def get_settings():
 def set_settings(patch: SettingsPatch):
     current = load_settings()
     data = current.safe_dict()
-    for key, value in patch.model_dump(exclude_none=True).items():
+    changes = patch.model_dump(exclude_none=True)
+    for key, value in changes.items():
         if key == "openai_api_key" and value == "********":
             continue
         data[key] = value
     updated = Settings.from_dict(data)
     save_settings(updated)
+    # 设备或精度变了就把已加载的模型丢掉，否则旧模型（尤其是显存里那份）会一直沿用
+    if any(k in changes for k in ("device", "compute_type", "cpu_threads", "whisper_model")):
+        asr.clear_cache()
     pipeline.invalidate_settings_cache()
     reschedule()
     return updated.safe_dict()
+
+
+@app.get("/api/device")
+def get_device():
+    """这台机器到底会用 GPU 还是 CPU —— 界面上那行提示读这里。"""
+    settings = load_settings()
+    return pipeline.device_summary(settings)
 
 
 # ------------------------------------------------------------------ scanning

@@ -1,35 +1,35 @@
-# 直接拉现成镜像跑，不本地构建（推荐给不想装构建环境的人）
+# 拉现成镜像跑：只需要改「端口」和「路径」两处，其余全部首次运行时自动创建，
+# 之后登录 Web UI 在「设置」页里配（翻译接口、并发、限流、预算……）。
 #
-#   cp .env.example .env      # 改 MEDIA_DIR / WEB_PASSWORD
 #   docker compose -f compose.image.yaml up -d
+#   docker compose -f compose.image.yaml logs subtitle | grep -A6 "首次启动"
 #
-# 镜像由 GitHub Actions 自动构建：改代码 push 到 main 即自动测试 → 构建 → 推 Docker Hub。
+# 镜像由 GitHub Actions 自动构建：改代码 push 到 main 就自动测试 → 构建 → 推 Docker Hub。
 # Docker Hub（主）: lzylipu/nas-subtitle-pipeline
 # GHCR（镜像）    : ghcr.io/lzylipu/nas-subtitle-pipeline
 services:
   subtitle:
-    # 想用 GHCR 镜像就把下一行换成 ghcr.io/lzylipu/nas-subtitle-pipeline:latest
+    # 有 NVIDIA 显卡就换成 :latest-cuda（多约 1.2GB，装了 cublas/cudnn）；
+    # 程序每次启动都会自己探测：有可用 GPU 就用 GPU，没有就用 CPU，不需要改这里。
+    # 想用 GHCR 镜像就换成 ghcr.io/lzylipu/nas-subtitle-pipeline:latest
     image: lzylipu/nas-subtitle-pipeline:latest
+    container_name: nas-subtitle
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
-    environment:
-      MEDIA_ROOT: /media
-      DATA_DIR: /data
-      WEB_USER: admin
-      WEB_PASSWORD: ${WEB_PASSWORD:?Set WEB_PASSWORD in .env}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ASR_WORKERS: ${ASR_WORKERS:-1}
-      TRANSLATE_WORKERS: ${TRANSLATE_WORKERS:-1}
-      EXTRACT_WORKERS: ${EXTRACT_WORKERS:-1}
-      TRANSLATE_RPM: ${TRANSLATE_RPM:-20}
-      TRANSLATE_MIN_INTERVAL: ${TRANSLATE_MIN_INTERVAL:-3}
-      DAILY_CHAR_BUDGET: ${DAILY_CHAR_BUDGET:-0}
-      TZ: Asia/Shanghai
+      # ① 端口：冒号左边是 NAS 上访问用的端口，被占用就改成 8001 / 9000……
+      - "8000:8000"
     volumes:
-      # 必须是 rw：字幕要写在影片同目录（程序只创建 *.srt，不改视频）
-      - ${MEDIA_DIR:?Set MEDIA_DIR in .env}:/media
+      # ② 路径：冒号左边换成你自己的影片目录。
+      #    必须可写——字幕写在影片同目录（片名.zh-CN.srt），程序只创建 *.srt，不动视频。
+      - /volume1/video:/media
+      # 数据目录：数据库、模型、登录口令都在这。目录不存在会自动建，删掉等于重装。
       - ./data:/data
+    # ---- 有显卡时取消下面这段注释，把 GPU 交给容器（配合 :latest-cuda 镜像）----
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     stop_grace_period: 60s

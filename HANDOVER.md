@@ -69,10 +69,34 @@
 
 - 仓库、`.env`、镜像里**没有任何 key**。`OPENAI_BASE_URL / MODEL / KEY` 默认空，
   网页填，落库（`/data/pipeline.db`），API 返回时 key 掩码为 `********`
-- 首次启动随机生成 `hs_` + 43 字符 token，同样只存数据库
+- **Web 登录口令不需要用户配**：`WEB_PASSWORD` 没设时，首次启动自动生成
+  （`secrets.token_urlsafe(12)`），写 `/data/admin-password.txt`（0600，原子替换），
+  并在日志里打印一次；重启读同一文件，口令不变。数据目录不可写则退回内存口令并在日志告警。
+  优先级：`WEB_PASSWORD` 环境变量 > 已有口令文件 > 自动生成
+- 首次启动随机生成 `hs_` + 43 字符 AI token，同样只存数据库
 - 两套鉴权并存：浏览器 Basic（`WEB_USER`/`WEB_PASSWORD`），AI 用
-  `Authorization: Bearer <token>`
+  `Authorization: Bearer <api_token>`
 - token 可设「只读」：GET 放行，写操作 403
+- **部署面只剩端口和路径**：`compose.yaml` / `compose.image.yaml` 里没有 `environment:`
+  整段，`MEDIA_ROOT` 走默认 `/media`，时区写进 Dockerfile 的 `ENV TZ`
+
+## 6.1 设备识别（GPU 优先，CPU 兜底）
+
+`app/devices.py`。**没有任何地方写死 `device="cpu"`**——旧版本写死了，已修。
+
+| 决策 | 依据 |
+|---|---|
+| 有没有 GPU | `ctranslate2.get_cuda_device_count()`（PyPI 的 ctranslate2 wheel 带 CUDA 支持，运行时 dlopen 加载 cublas/cudnn；缺库/缺驱动时返回 0） |
+| 显卡型号/显存 | `nvidia-smi --query-gpu=name,memory.total`，只用于展示和 `compute_type` 微调 |
+| 精度 | GPU → `float16`；显存 < 4096MB → `int8_float16`；CPU → `int8` |
+| 线程 | GPU → 1（只喂数据）；CPU → `min(4, 核数)` |
+| 强制 cuda 但没设备 | 回退 CPU，`reason` 里写明原因，任务照跑不报错 |
+
+- 设置项 `device`（auto/cuda/cpu）与 `compute_type`（auto/float16/int8_float16/int8/int8_float32/float32）默认都是 `auto`
+- `GET /api/device` 返回 `{device, compute_type, cpu_threads, reason, hardware{...}}`；`/api/stats` 里也带 `asr_device`
+- 改设备/精度/模型 → 服务端 `asr.clear_cache()`，旧模型（含显存那份）不会继续被用
+- 镜像两个 tag：`latest`（CPU，~1.1GB）与 `latest-cuda`（+cublas/cudnn，~2.3GB），
+  由 `Dockerfile` 的 `ARG WITH_CUDA` 控制；**程序代码完全相同**，跑哪种机器都能自适应
 
 ## 7. 实机实测（测试机：2 vCPU / 3GB / Debian 12 LXC）
 

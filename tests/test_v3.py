@@ -1,9 +1,12 @@
 """v3 新增能力测试：目录索引、按目录入队、限流闸门、AI token 鉴权。"""
+import os
 import shutil
+import stat
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import env
 
@@ -244,6 +247,74 @@ class DefaultSettingsTests(unittest.TestCase):
         s = Settings()
         self.assertGreater(s.translate_min_interval, 0)
         self.assertLessEqual(s.translate_rpm, 60)
+
+
+class AutoPasswordTests(unittest.TestCase):
+    """没配 WEB_PASSWORD 也要能起来：自动生成一次、落盘复用、不因缺配置拒绝启动。"""
+
+    def setUp(self):
+        from app import main
+        self.main = main
+        env.reset()
+        main.reset_web_credentials()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.pwfile = self.tmp / "admin-password.txt"
+        self._orig_file = main.PASSWORD_FILE
+        main.PASSWORD_FILE = self.pwfile
+        self._orig_env = os.environ.pop("WEB_PASSWORD", None)
+
+    def tearDown(self):
+        self.main.PASSWORD_FILE = self._orig_file
+        if self._orig_env is not None:
+            os.environ["WEB_PASSWORD"] = self._orig_env
+        else:
+            os.environ.pop("WEB_PASSWORD", None)
+        self.main.reset_web_credentials()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_generates_password_when_env_missing(self):
+        user, password = self.main.web_credentials()
+        self.assertEqual(user, "admin")
+        self.assertGreaterEqual(len(password), 12)
+        self.assertEqual(self.main.web_password_source(), "new")
+        self.assertEqual(self.pwfile.read_text(encoding="utf-8").strip(), password)
+
+    def test_reuses_password_file_across_restart(self):
+        _, first = self.main.web_credentials()
+        self.main.reset_web_credentials()
+        _, second = self.main.web_credentials()
+        self.assertEqual(first, second)
+        self.assertEqual(self.main.web_password_source(), "file")
+
+    def test_env_password_wins_over_file(self):
+        self.pwfile.write_text("fromfile\n", encoding="utf-8")
+        os.environ["WEB_PASSWORD"] = "fromenv"
+        try:
+            self.assertEqual(self.main.web_credentials()[1], "fromenv")
+            self.assertEqual(self.main.web_password_source(), "env")
+        finally:
+            os.environ.pop("WEB_PASSWORD", None)
+
+    def test_password_file_is_mode_600(self):
+        self.main.web_credentials()
+        mode = stat.S_IMODE(os.stat(self.pwfile).st_mode)
+        self.assertEqual(mode, 0o600)
+
+    def test_unwritable_location_falls_back_to_memory(self):
+        self.main.PASSWORD_FILE = Path("/proc/definitely-not-here/pw.txt")
+        _, password = self.main.web_credentials()
+        self.assertTrue(password)
+        self.assertEqual(self.main.web_password_source(), "memory")
+
+    def test_generated_password_actually_authenticates(self):
+        from fastapi import HTTPException
+        from fastapi.security import HTTPBasicCredentials
+        _, password = self.main.web_credentials()
+        request = SimpleNamespace(method="GET", headers={})
+        self.main.authorized(request, HTTPBasicCredentials(username="admin", password=password))
+        with self.assertRaises(HTTPException):
+            self.main.authorized(
+                request, HTTPBasicCredentials(username="admin", password="wrong"))
 
 
 if __name__ == "__main__":

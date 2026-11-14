@@ -41,15 +41,25 @@ def extract_audio(video: Path, output: Path) -> None:
     )
 
 
-def get_model(name: str, compute_type: str, cpu_threads: int):
-    key = (threading.get_ident(), name, compute_type, cpu_threads)
+def get_model(name: str, device: str, compute_type: str, cpu_threads: int):
+    """按 (设备, 精度) 缓存模型；换设置就换一份，不混用。
+
+    device 由 devices.resolve() 决定（有 GPU 用 cuda，没有用 cpu），这里只负责执行。
+    """
+    key = (threading.get_ident(), name, device, compute_type, cpu_threads)
     with _CACHE_LOCK:
         if key not in _CACHE:
-            model = WhisperModel(name, device="cpu", compute_type=compute_type,
+            model = WhisperModel(name, device=device, compute_type=compute_type,
                                  cpu_threads=cpu_threads)
             batched = BatchedInferencePipeline(model=model) if BatchedInferencePipeline else None
             _CACHE[key] = (model, batched)
         return _CACHE[key]
+
+
+def clear_cache() -> None:
+    """改设备/精度后调用，避免旧模型占着显存。"""
+    with _CACHE_LOCK:
+        _CACHE.clear()
 
 
 def transcribe_audio(
@@ -62,8 +72,9 @@ def transcribe_audio(
     batch_size: int = 8,
     progress: Callable[[float, str], None] | None = None,
     total_duration: float = 0.0,
+    device: str = "auto",
 ) -> tuple[list[dict[str, Any]], str, float]:
-    model, batched = get_model(model_name, compute_type, cpu_threads)
+    model, batched = get_model(model_name, device, compute_type, cpu_threads)
     kwargs: dict[str, Any] = dict(language=language or None, vad_filter=True, beam_size=beam_size)
 
     if batched is not None and batch_size > 1:

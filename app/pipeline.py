@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import asr
+from . import asr, devices
 from .config import AUDIO_DIR, DATA_DIR, Settings
 from .db import (
     add_event, advance, claim, connect, counter_add, counter_get, fail, finish,
@@ -165,11 +165,12 @@ def handle_asr(job: dict, settings: Settings) -> None:
         last_push[0] = stamp
         update_job(job["id"], progress=10 + int(ratio * 60), message=(text or "")[:120])
 
+    plan = devices.resolve(settings.device, settings.compute_type, settings.cpu_threads)
     segments, language, duration = asr.transcribe_audio(
-        audio, settings.whisper_model, settings.compute_type, settings.cpu_threads,
+        audio, settings.whisper_model, plan.compute_type, plan.cpu_threads,
         settings.source_language, beam_size=settings.beam_size,
         batch_size=settings.asr_batch_size, progress=progress,
-        total_duration=job["duration"] or 0.0,
+        total_duration=job["duration"] or 0.0, device=plan.device,
     )
     frames = asr.transcript_to_cues(segments)
     if not frames:
@@ -422,6 +423,12 @@ def count_pending(scope: str | None = None) -> dict:
 # --------------------------------------------------------------------- stats
 
 
+def device_summary(settings: Settings) -> dict:
+    """给界面/接口用的一行话：这台机器最终会用 GPU 还是 CPU。"""
+    plan = devices.resolve(settings.device, settings.compute_type, settings.cpu_threads)
+    return plan.to_dict()
+
+
 def stats() -> dict:
     with connect() as conn:
         by_status = {r["status"]: r["c"] for r in conn.execute(
@@ -470,4 +477,6 @@ def stats() -> dict:
         "translate_api": limiter.snapshot(),
         "config_ready": bool(settings.openai_base_url and settings.openai_model
                              and settings.openai_api_key),
+        # 实际会用的设备与精度（有 GPU 就是 cuda，没有就是 cpu）
+        "asr_device": device_summary(settings),
     }

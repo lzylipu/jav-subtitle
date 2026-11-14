@@ -27,6 +27,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CPU 版：绝大多数 NAS，1.1GB
+          - suffix: ""
+            cuda: "0"
+            label: CPU
+          # CUDA 版：带 N 卡的机器，程序运行时自动识别并优先用 GPU
+          - suffix: "-cuda"
+            cuda: "1"
+            label: CUDA
     steps:
       - uses: actions/checkout@v4
 
@@ -52,16 +64,19 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/nas-subtitle-pipeline
             ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
-            type=sha,format=short
+            type=raw,value=latest${{ matrix.suffix }},enable={{is_default_branch}}
+            type=raw,value=${{ github.ref_name }}${{ matrix.suffix }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short,prefix=sha-,suffix=${{ matrix.suffix }}
 
-      - uses: docker/build-push-action@v6
+      - name: 构建并推送（${{ matrix.label }}）
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
+          build-args: |
+            WITH_CUDA=${{ matrix.cuda }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.label }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.label }}

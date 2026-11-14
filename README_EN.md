@@ -8,7 +8,7 @@ An end-to-end pipeline that turns Japanese films/dramas on your NAS into Simplif
 - Skips files that already have Chinese subtitles; never overwrites by default
 - Output layout: `Movie.mkv` + `Movie.zh-CN.srt` in the same folder
 - Built for **hundreds to thousands** of files running for days or weeks; survives restarts
-- Runs on **CPU only** (no iGPU/GPU required)
+- Runs on **CPU only** (no GPU required) — and uses a GPU automatically when one is available
 
 > This project ships with **no API keys**. Endpoint, model and key are configured in the web UI and stored only in your local SQLite database.
 
@@ -27,23 +27,32 @@ An end-to-end pipeline that turns Japanese films/dramas on your NAS into Simplif
 
 ---
 
-## 🚀 Three-step deployment
+## 🚀 Deployment: change only the port and the path
+
+You edit **two lines** — the port and your video folder. Everything else (login password, database, model folder, translation endpoint, concurrency, rate limiting) is **created automatically on first run** and then configured in the Web UI.
 
 ### Option A: pull the prebuilt image (no build needed)
 
-Images are built and pushed automatically by GitHub Actions on every push to `main`.
+```bash
+mkdir -p /opt/nas-subtitle && cd /opt/nas-subtitle
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+```
+
+Open `compose.image.yaml` and change just these two places:
+
+```yaml
+    ports:
+      - "8000:8000"                 # ① left side = the port you want to expose
+    volumes:
+      - /volume1/video:/media       # ② left side = your video folder
+```
 
 ```bash
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/.env.example
-
-mv .env.example .env
-# edit only two lines:
-#   MEDIA_DIR=/volume1/video     ← your video folder
-#   WEB_PASSWORD=a-long-password
-
 docker compose -f compose.image.yaml up -d
+docker compose -f compose.image.yaml logs subtitle | grep -A6 "首次启动"
 ```
+
+The log prints the auto-generated login password on first boot; it is also written to `./data/admin-password.txt` and survives restarts.
 
 | Registry | Image |
 |---|---|
@@ -53,18 +62,25 @@ docker compose -f compose.image.yaml up -d
 ### Option B: build locally
 
 ```bash
-git clone <this repo>
+git clone https://github.com/lzylipu/nas-subtitle-pipeline.git
 cd nas-subtitle-pipeline
-
-cp .env.example .env
-# same two edits: MEDIA_DIR and WEB_PASSWORD
-
+# still only the port and the path in compose.yaml
 docker compose up -d --build
+docker compose logs subtitle | grep -A6 "首次启动"
 ```
 
-Open `http://<nas-ip>:8000`. The browser prompts for Basic auth: user `admin`, password from `WEB_PASSWORD`.
+### What first boot creates for you
 
-First boot downloads the Whisper model (`small`, ~460 MB) into `./data/models` (via `HF_HOME`).
+| Created automatically | Location |
+|---|---|
+| Login password | `./data/admin-password.txt` (`WEB_PASSWORD` env wins if set) |
+| Database (settings, jobs, translation memory) | `./data/pipeline.db` |
+| Whisper models | `./data/models` (~460 MB on first run) |
+| Audio scratch files | `./data/audio` |
+
+To change the password, edit that one line in `./data/admin-password.txt` and `docker compose restart`. To start over, stop the container and delete `./data`.
+
+First boot downloads the Whisper model (`small`, ~460 MB); inside mainland China set `HF_ENDPOINT=https://hf-mirror.com`.
 
 ---
 
@@ -110,7 +126,8 @@ Each stage has **its own queue and worker pool**: while one file is transcribing
 | Stage | Bottleneck | Suggested concurrency |
 |---|---|---|
 | Extract | disk I/O | 1–2 |
-| Transcribe | **CPU** (saturates all cores) | 1 on a 4-core box |
+| Transcribe (CPU) | **CPU** (saturates all cores) | 1 on a 4-core box |
+| Transcribe (GPU) | VRAM / SM throughput | 1–2, more only if VRAM allows |
 | Translate | **network wait** (CPU idle) | bounded by provider limits |
 
 All three default to `1`.
@@ -156,15 +173,41 @@ curl -X POST -H "Authorization: Bearer hs_xxx" -H "Content-Type: application/jso
 
 ---
 
-## 🖥 Reality on CPU-only hardware (e.g. Xeon E3-1231 v3)
+## 🖥 Hardware: GPU first, CPU fallback
+
+Every boot probes the machine once; the result shows at the top of Settings → Transcription:
+
+```
+当前会使用：CPU ｜ 精度 int8 ｜ 线程 4 ｜ 机器 8 线程
+自动识别未发现可用 CUDA 设备，使用 CPU
+```
+
+| Situation | Result |
+|---|---|
+| NVIDIA GPU + `:latest-cuda` image + GPU passed to the container | Uses GPU at `float16` |
+| GPU present but the CPU image is running | No CUDA libs found → falls back to CPU (never crashes) |
+| GPU with < 4 GB VRAM | Downgrades to `int8_float16` to avoid OOM |
+| No GPU at all (e.g. E3-1231 v3) | CPU + `int8`, threads = `min(4, cores)` |
+| "Force GPU" selected with no GPU present | Falls back to CPU and says why |
+
+`device` and `compute_type` both default to `auto`; you normally never touch them.
+
+### Reality on CPU-only hardware (e.g. Xeon E3-1231 v3)
 
 | Item | Note |
 |---|---|
 | Model | `small` + `int8` is the sweet spot for 4 cores; `medium` is ~2.5–3× slower |
 | Throughput | Measured 5× realtime on 2 vCPU; 10–18× expected on 4C/8T (**needs on-site measurement**) |
 | Memory | ~0.5–1 GB per instance with `small`+int8 |
-| Threads | Set `cpu_threads` to physical cores; more just thrashes |
+| Threads | Automatic by default (`min(4, cores)`); set an explicit number to override, `0` = auto |
 | Batch inference | Off by default: 34% faster but merges 30 cues into 5 × 35-second blocks, destroying timing |
+
+### Using a GPU
+
+1. Install the NVIDIA driver + nvidia-container-toolkit on the host
+2. Switch the image to `:latest-cuda`
+3. Uncomment the `deploy:` block in `compose.image.yaml`
+4. Confirm Settings → Transcription reads `GPU：<your card>`
 
 Measure on your own box:
 
@@ -174,7 +217,7 @@ docker compose exec subtitle python tools/bench.py /media/some-movie.mp4
 
 ## 🧱 Stack
 
-Python 3.12 · FastAPI · SQLite (WAL, `BEGIN IMMEDIATE` atomic claim) · FFmpeg · faster-whisper (CTranslate2, CPU int8) · httpx · single-file frontend, no build step.
+Python 3.12 · FastAPI · SQLite (WAL, `BEGIN IMMEDIATE` atomic claim) · FFmpeg · faster-whisper (CTranslate2; GPU `float16` when a GPU is available, CPU `int8` otherwise, decided at runtime) · httpx · single-file frontend, no build step.
 
 ## ⚠️ Known limits
 

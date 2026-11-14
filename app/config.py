@@ -29,8 +29,12 @@ class Settings:
 
     # 转写
     whisper_model: str = "small"
-    compute_type: str = "int8"
-    cpu_threads: int = 4
+    # auto = 有 GPU 就用 GPU，没有就 CPU；也可以强制 cuda / cpu
+    device: str = "auto"
+    # auto = 跟着 device 自动选（GPU→float16，CPU→int8）
+    compute_type: str = "auto"
+    # 0 = 跟随 device 自动决定线程数
+    cpu_threads: int = 0
     beam_size: int = 1
     # 0/1 = 关闭批推理。实测（2 vCPU）：批推理快 34%，但会把 30 句对白并成 5 条长字幕，
     # 时间轴粒度毁掉，不适合做字幕。要速度不要粒度的场景再开。
@@ -100,6 +104,7 @@ def settings_from_env() -> Settings:
         "SOURCE_LANGUAGE": "source_language",
         "TARGET_LANGUAGE": "target_language",
         "WHISPER_MODEL": "whisper_model",
+        "DEVICE": "device",
         "COMPUTE_TYPE": "compute_type",
         "CPU_THREADS": "cpu_threads",
         "ASR_WORKERS": "asr_workers",
