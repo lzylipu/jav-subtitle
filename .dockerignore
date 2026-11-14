@@ -12,7 +12,6 @@ data
 .env
 .env.*
 tests
-tools
 README_EN.md
 HANDOVER.md
 TEST-REPORT.md
