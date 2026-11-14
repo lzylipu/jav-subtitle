@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NAS 字幕流水线</title>
+<style>
+:root{font-family:system-ui,"Noto Sans SC","Microsoft YaHei",sans-serif;color:#1d2a31;background:#f4f6f5;--ok:#16817a;--warn:#b4741c;--bad:#b4453a;--mut:#61736f}
+*{box-sizing:border-box}body{margin:0}
+header{background:#13293a;color:#fff;padding:14px 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+h1{font-size:17px;margin:0;font-weight:600}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{background:rgba(255,255,255,.12);border-radius:12px;padding:3px 10px;font-size:12px;white-space:nowrap}
+.tag b{color:#8fe0d4;font-weight:600}
+main{max-width:1280px;margin:0 auto;padding:16px 22px 60px}
+nav{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;border-radius:6px;border:1px solid #166c68;background:#166c68;color:#fff;padding:7px 12px;cursor:pointer}
+button.ghost{background:#fff;color:#174c4a}
+button.on{background:#166c68;color:#fff;border-color:#166c68}
+button.mini{padding:4px 8px;font-size:12px}
+button:disabled{opacity:.45;cursor:default}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+input,select{font:inherit;font-size:13px;border:1px solid #b9c8c4;border-radius:5px;padding:7px 8px;background:#fff;min-width:0}
+#notice{min-height:20px;font-size:13px;color:#a4402a;margin:0 0 8px}
+table{width:100%;border-collapse:collapse;background:#fff;font-size:13px;table-layout:fixed}
+th,td{padding:8px 10px;border-bottom:1px solid #e5eae8;text-align:left;vertical-align:top}
+th{background:#e9f0ee;color:#334a47;font-weight:600;font-size:12px}
+td.path{overflow-wrap:anywhere;word-break:break-all;color:#33474f}
+td.msg{overflow-wrap:anywhere;color:#4a5d5a}
+.ellip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;white-space:nowrap}
+.b-run{background:#e3f0ff;color:#1d5fa8}.b-done{background:#e2f4ef;color:#0e6b5f}
+.b-skip{background:#eef0ef;color:#61736f}.b-fail{background:#fbe9e7;color:#a4302a}
+.b-pend{background:#f3f0e2;color:#8a6d16}
+.b-new{background:#eef2fb;color:#2c4a8a}
+.prog{height:6px;background:#e6edeb;border-radius:4px;overflow:hidden;margin-top:4px}
+.prog i{display:block;height:100%;background:var(--ok)}
+.pager{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--mut)}
+form{display:grid;grid-template-columns:1fr;gap:14px;max-width:960px}
+fieldset{border:1px solid #dbe4e1;border-radius:8px;padding:12px 16px 16px;background:#fff;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+legend{font-size:13px;font-weight:600;color:#2c5b57;padding:0 6px}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#3d5450;min-width:0}
+label.check{flex-direction:row;align-items:center;gap:7px}
+input[type=checkbox]{width:15px;height:15px;flex:none}
+.hint{font-size:11px;color:var(--mut);line-height:1.5;grid-column:1/-1}
+form > button{justify-self:start}
+dialog{border:1px solid #cfdad6;border-radius:8px;max-width:min(760px,92vw);width:100%}
+dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:55vh;overflow:auto}
+.crumb{font-size:13px;color:#33474f;margin-bottom:8px;overflow-wrap:anywhere}
+.crumb a{color:#166c68;cursor:pointer;text-decoration:underline}
+tr.dir:hover td{background:#f6faf9}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.tokenbox{display:flex;gap:8px;grid-column:1/-1;align-items:center}
+.tokenbox input{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+pre.help{background:#fff;border:1px solid #dbe4e1;border-radius:8px;padding:12px;font-size:12px;
+  overflow:auto;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:760px){fieldset{grid-template-columns:1fr}main{padding:12px}th:nth-child(2),td:nth-child(2){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>NAS 字幕流水线</h1>
+  <div class="tags" id="tags"></div>
+</header>
+<main>
+  <nav>
+    <button class="ghost" id="tabLib">媒体库</button>
+    <button class="ghost" id="tabJobs">任务</button>
+    <button class="ghost" id="tabSet">设置</button>
+    <button class="ghost" id="tabAi">AI 接入</button>
+  </nav>
+  <p id="notice" role="status"></p>
+
+  <section id="libView">
+    <div class="bar">
+      <button id="reindex">重新索引</button>
+      <button class="ghost" id="libUp">上一级</button>
+      <input id="limitN" type="number" min="0" value="0" style="width:110px" title="只处理前 N 部，0 为不限">
+      <button id="enqueueSel">加入队列</button>
+      <span class="hint" id="libInfo"></span>
+    </div>
+    <div class="crumb" id="crumb"></div>
+    <table>
+      <colgroup><col style="width:44px"><col><col style="width:90px"><col style="width:90px"><col style="width:90px"><col style="width:90px"></colgroup>
+      <thead><tr><th><input type="checkbox" id="checkAll" title="全选"></th><th>目录</th><th>视频</th><th>已完成</th><th>未处理</th><th>队列中</th></tr></thead>
+      <tbody id="libRows"></tbody>
+    </table>
+  </section>
+
+  <section id="jobsView" hidden>
+    <div class="bar">
+      <button id="scan">扫描媒体</button>
+      <button class="ghost" id="toggle">暂停队列</button>
+      <button class="ghost" id="retryAll">重试全部失败</button>
+      <select id="statusFilter">
+        <option value="">全部状态</option>
+        <option value="pending">待处理</option>
+        <option value="running">处理中</option>
+        <option value="done">完成</option>
+        <option value="failed">失败</option>
+        <option value="skipped">跳过</option>
+      </select>
+      <select id="stageFilter">
+        <option value="">全部阶段</option>
+        <option value="extract">抽音频</option>
+        <option value="asr">转写</option>
+        <option value="translate">翻译</option>
+      </select>
+      <input id="search" placeholder="按路径搜索" style="flex:1;min-width:140px">
+    </div>
+    <table>
+      <colgroup><col style="width:38%"><col style="width:10%"><col style="width:14%"><col style="width:28%"><col style="width:10%"></colgroup>
+      <thead><tr><th>视频</th><th>状态</th><th>阶段 / 进度</th><th>消息</th><th>操作</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="pager">
+      <button class="ghost mini" id="prev">上一页</button>
+      <span id="pageInfo"></span>
+      <button class="ghost mini" id="next">下一页</button>
+    </div>
+  </section>
+
+  <section id="setView" hidden>
+    <form id="settings">
+      <fieldset><legend>目录与语言</legend>
+        <label>媒体根目录（容器内路径）<input name="media_root" required></label>
+        <label>源语言<input name="source_language" required></label>
+        <label>目标语言<input name="target_language" required></label>
+        <label>文件稳定等待（秒）<input name="min_file_age" type="number" min="0" required></label>
+      </fieldset>
+
+      <fieldset><legend>转写（faster-whisper / CPU）</legend>
+        <label>模型<input name="whisper_model" required></label>
+        <label>精度<input name="compute_type" required></label>
+        <label>每实例线程数<input name="cpu_threads" type="number" min="1" max="64" required></label>
+        <label>beam size（1 最快，5 更准）<input name="beam_size" type="number" min="1" max="10" required></label>
+        <label>批推理大小（1 关闭批处理）<input name="asr_batch_size" type="number" min="1" max="32" required></label>
+        <label class="check"><input name="keep_japanese_srt" type="checkbox">保存日文字幕到影片目录</label>
+        <label class="check"><input name="keep_audio" type="checkbox">保留提取的音频（占空间）</label>
+      </fieldset>
+
+      <fieldset><legend>并行度（各阶段独立排队）</legend>
+        <label>抽音频并发<input name="extract_workers" type="number" min="1" max="16" required></label>
+        <label>转写并发<input name="asr_workers" type="number" min="1" max="8" required></label>
+        <label>翻译并发<input name="translate_workers" type="number" min="1" max="16" required></label>
+        <div class="hint">转写吃 CPU，4 核机器建议 1；翻译走网络，可在限流允许范围内调高。</div>
+      </fieldset>
+
+      <fieldset><legend>翻译接口（OpenAI 兼容）</legend>
+        <label>接口地址<input name="openai_base_url" required></label>
+        <label>模型<input name="openai_model" required></label>
+        <label>API 密钥（留空/******** 表示不变）<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="在此粘贴你自己的 key，不要写进 .env"></label>
+        <label>每批条数<input name="translation_batch_size" type="number" min="1" max="200" required></label>
+        <label>失败重试次数<input name="translate_retries" type="number" min="1" max="10" required></label>
+        <label>每日翻译字数预算（0 不限）<input name="daily_char_budget" type="number" min="0" required></label>
+        <label class="check"><input name="tm_enabled" type="checkbox">启用翻译记忆（重复台词不再收费）</label>
+      </fieldset>
+
+      <fieldset><legend>限流（保护中转站，别把 key 打爆）</legend>
+        <label>每分钟最多请求数（0 不限）<input name="translate_rpm" type="number" min="0" max="600" required></label>
+        <label>两次请求最小间隔（秒）<input name="translate_min_interval" type="number" min="0" max="600" step="0.5" required></label>
+        <label>收到 429 后冷却（秒）<input name="translate_429_backoff" type="number" min="10" max="3600" required></label>
+        <div class="hint">实际间隔取「60/rpm」和「最小间隔」里更大的那个，绝不会突发。收到 429 时所有 worker 一起停手，冷却时间连续 429 会翻倍。</div>
+      </fieldset>
+
+      <fieldset><legend>扫描与容错</legend>
+        <label>每日扫描小时<input name="schedule_hour" type="number" min="0" max="23" required></label>
+        <label>每日扫描分钟<input name="schedule_minute" type="number" min="0" max="59" required></label>
+        <label>单阶段最大重试<input name="max_attempts" type="number" min="1" max="10" required></label>
+        <label class="check"><input name="schedule_enabled" type="checkbox">启用每日扫描</label>
+        <label class="check"><input name="auto_enqueue" type="checkbox">扫描后自动把全部视频入队（默认关，开启前想清楚额度）</label>
+        <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有中文字幕</label>
+      </fieldset>
+
+      <button type="submit">保存设置</button>
+    </form>
+  </section>
+
+  <section id="aiView" hidden>
+    <form id="aiform">
+      <fieldset><legend>AI 接入（供内网其它 Agent 调试 / 监控）</legend>
+        <label style="grid-column:1/-1">对外访问地址（填容器外能访问的地址，例如 http://10.10.0.5:8000）<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
+        <label class="check" style="grid-column:1/-1"><input name="api_token_readonly" type="checkbox">该 token 只读（只允许查询，不允许暂停/重试/入队）</label>
+        <label style="grid-column:1/-1">AI 接入 token（给内网 Agent 用）
+          <div class="tokenbox">
+            <input id="tokenValue" readonly>
+            <button type="button" class="ghost mini" id="copyToken">复制</button>
+            <button type="button" class="ghost mini" id="rotateToken">重新生成</button>
+          </div>
+        </label>
+        <div class="hint">token 只在服务端数据库里，不进代码仓库、不进 .env。请求头用 <span class="mono">Authorization: Bearer &lt;token&gt;</span>，浏览器仍走 Basic 登录。把地址和 token 一起给 AI，它就能读状态、看日志、暂停队列、重试任务。</div>
+      </fieldset>
+      <button type="submit">保存接入设置</button>
+    </form>
+    <h3 style="font-size:14px;margin:18px 0 8px">接口清单</h3>
+    <pre class="help" id="aiHelp">加载中…</pre>
+  </section>
+
+  <dialog id="dlg"><h3 style="margin-top:0">任务记录</h3><pre id="log"></pre><button class="ghost" id="close">关闭</button></dialog>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const state = {page:1, size:50, total:0, libPath:'', libRoot:''};
+const notice = t => $('notice').textContent = t || '';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, method = 'GET', body) {
+  const opt = {method, headers:{}};
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const text = await r.text();
+  if (!r.ok) throw new Error(text.slice(0, 300) || ('HTTP ' + r.status));
+  return text ? JSON.parse(text) : {};
+}
+
+function fmtDuration(sec) {
+  if (!sec && sec !== 0) return '—';
+  if (sec < 90) return Math.round(sec) + ' 秒';
+  if (sec < 5400) return (sec / 60).toFixed(1) + ' 分钟';
+  if (sec < 172800) return (sec / 3600).toFixed(1) + ' 小时';
+  return (sec / 86400).toFixed(1) + ' 天';
+}
+
+const statusClass = s => ({running:'b-run', done:'b-done', skipped:'b-skip', failed:'b-fail', pending:'b-pend'}[s] || 'b-pend');
+const statusText = s => ({running:'处理中', done:'完成', skipped:'跳过', failed:'失败', pending:'待处理'}[s] || s);
+const stageText = s => ({extract:'抽音频', asr:'转写', translate:'翻译', done:'已完成', failed:'失败'}[s] || s);
+
+async function refreshStats() {
+  try {
+    const s = await api('/api/stats');
+    const eta = s.eta_seconds ? fmtDuration(s.eta_seconds) : '待估';
+    const ratio = s.asr_ratio ? (s.asr_ratio.toFixed(2) + '×实时') : '待测';
+    const lm = s.translate_api || {};
+    const tags = [
+      ['索引视频', s.indexed_videos], ['队列总数', s.total], ['待处理', s.pending], ['处理中', s.running],
+      ['完成', s.done], ['失败', s.failed], ['转写速度', ratio], ['剩余估算', eta],
+      ['今日字数', s.chars_today], ['近1分钟请求', lm.sent_last_minute ?? 0]
+    ];
+    if (lm.cooldown_remaining > 0) tags.push(['限流冷却', lm.cooldown_remaining + ' 秒']);
+    $('tags').innerHTML = tags.map(([k, v]) => `<span class="tag">${k} <b>${esc(v)}</b></span>`).join('');
+    $('toggle').textContent = s.paused ? '恢复队列' : '暂停队列';
+    $('toggle').dataset.paused = s.paused ? '1' : '0';
+    if (s.blocked) notice(s.blocked); else if (!s.config_ready) notice('翻译接口还没配好：到「设置」填接口地址、模型和 API 密钥。');
+    else if (!$('notice').dataset.keep) notice('');
+    return s;
+  } catch (e) { notice('统计失败：' + e.message); }
+}
+
+async function refreshJobs() {
+  const params = new URLSearchParams({page: state.page, size: state.size});
+  const st = $('statusFilter').value, sg = $('stageFilter').value, q = $('search').value.trim();
+  if (st) params.set('status', st);
+  if (sg) params.set('stage', sg);
+  if (q) params.set('q', q);
+  try {
+    const data = await api('/api/jobs?' + params);
+    state.total = data.total;
+    $('rows').innerHTML = data.items.map(j => {
+      const name = j.video_path.split('/').pop();
+      const pct = Math.max(0, Math.min(100, j.progress || 0));
+      const msg = j.error || j.message || '';
+      return `<tr>
+        <td class="path"><span class="ellip" title="${esc(j.video_path)}">${esc(name)}</span>
+          <span class="hint ellip" title="${esc(j.video_path)}">${esc(j.video_path)}</span></td>
+        <td><span class="badge ${statusClass(j.status)}">${statusText(j.status)}</span></td>
+        <td>${stageText(j.stage)} ${pct}%<div class="prog"><i style="width:${pct}%"></i></div></td>
+        <td class="msg"><span class="ellip" title="${esc(msg)}">${esc(msg)}</span></td>
+        <td>
+          <button class="ghost mini" onclick="showLog(${j.id})">记录</button>
+          ${j.status === 'failed' ? `<button class="mini" onclick="retry(${j.id})">重试</button>` : ''}
+        </td></tr>`;
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:#61736f;padding:24px">暂无任务，先到「媒体库」选目录加入队列</td></tr>';
+    const pages = Math.max(1, Math.ceil(data.total / state.size));
+    $('pageInfo').textContent = `第 ${state.page} / ${pages} 页 · 共 ${data.total} 条`;
+    $('prev').disabled = state.page <= 1;
+    $('next').disabled = state.page >= pages;
+  } catch (e) { notice('列表失败：' + e.message); }
+}
+
+async function loadLibrary(path) {
+  try {
+    const lib = await api('/api/library?path=' + encodeURIComponent(path || ''));
+    state.libPath = lib.path; state.libRoot = lib.root;
+    $('crumb').innerHTML = crumbHtml(lib);
+    $('libInfo').textContent = `本层直属视频 ${lib.self.direct} 部 · 含子目录共 ${lib.self.videos} 部 · 已完成 ${lib.self.done} · 未处理 ${lib.self.new}`;
+    $('libRows').innerHTML = lib.children.map(c => `<tr class="dir">
+        <td><input type="checkbox" class="pick" data-path="${esc(c.path)}"></td>
+        <td class="path"><a href="#" onclick="enterDir('${esc(c.path)}');return false">${esc(c.name)}</a></td>
+        <td class="num">${c.videos}</td>
+        <td class="num">${c.done}</td>
+        <td class="num"><span class="badge b-new">${c.new}</span></td>
+        <td class="num">${c.pending + c.running}</td>
+      </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:#61736f;padding:24px">这个目录下没有已索引的视频。先点「重新索引」。</td></tr>`;
+    $('checkAll').checked = false;
+  } catch (e) { notice('目录读取失败：' + e.message); }
+}
+
+function crumbHtml(lib) {
+  const root = lib.root;
+  const rel = lib.path.startsWith(root) ? lib.path.slice(root.length) : '';
+  const parts = rel.split('/').filter(Boolean);
+  let acc = root;
+  let html = `<a href="#" onclick="enterDir('');return false">${esc(root)}</a>`;
+  for (const p of parts) {
+    acc += '/' + p;
+    html += ` / <a href="#" onclick="enterDir('${esc(acc)}');return false">${esc(p)}</a>`;
+  }
+  return html;
+}
+
+function enterDir(path) { loadLibrary(path); }
+
+async function showLog(id) {
+  try {
+    const rows = await api(`/api/jobs/${id}/events`);
+    $('log').textContent = rows.map(r => `${r.created_at} [${r.level}] ${r.message}`).join('\n') || '无记录';
+    $('dlg').showModal();
+  } catch (e) { notice(e.message); }
+}
+async function retry(id) { try { await api(`/api/jobs/${id}/retry`, 'POST'); refresh(); } catch (e) { notice(e.message); } }
+
+async function loadSettings() {
+  const data = await api('/api/settings');
+  for (const [k, v] of Object.entries(data)) {
+    const el = $('settings').elements.namedItem(k);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  }
+}
+
+async function loadAi() {
+  const data = await api('/api/settings');
+  $('aiform').elements.namedItem('web_public_url').value = data.web_public_url || '';
+  $('aiform').elements.namedItem('api_token_readonly').checked = !!data.api_token_readonly;
+  $('tokenValue').value = data.api_token || '';
+  const help = await api('/api/ai/help');
+  $('aiHelp').textContent = help.auth + '\n\n' + help.endpoints.map(e =>
+    `${e.method.padEnd(4)} ${e.path}\n     ${e.desc}`).join('\n');
+}
+
+function refresh() { refreshStats(); refreshJobs(); }
+function show(view) {
+  const tabs = {lib:'libView', jobs:'jobsView', set:'setView', ai:'aiView'};
+  for (const [k, id] of Object.entries(tabs)) $(id).hidden = (k !== view);
+  for (const k of Object.keys(tabs)) {
+    const btn = $('tab' + k[0].toUpperCase() + k.slice(1));
+    if (btn) btn.classList.toggle('on', k === view);
+  }
+}
+
+$('tabLib').onclick = () => { show('lib'); loadLibrary(state.libPath); };
+$('tabJobs').onclick = () => { show('jobs'); refresh(); };
+$('tabSet').onclick = () => { show('set'); loadSettings().catch(e => notice(e.message)); };
+$('tabAi').onclick = () => { show('ai'); loadAi().catch(e => notice(e.message)); };
+for (const id of ['statusFilter', 'stageFilter']) $(id).onchange = () => { state.page = 1; refreshJobs(); };
+$('search').oninput = () => { state.page = 1; clearTimeout(window._t); window._t = setTimeout(refreshJobs, 300); };
+$('prev').onclick = () => { if (state.page > 1) { state.page--; refreshJobs(); } };
+$('next').onclick = () => { state.page++; refreshJobs(); };
+$('libUp').onclick = async () => {
+  const lib = await api('/api/library?path=' + encodeURIComponent(state.libPath));
+  loadLibrary(lib.parent || '');
+};
+$('checkAll').onchange = e => { for (const el of document.querySelectorAll('.pick')) el.checked = e.target.checked; };
+$('enqueueSel').onclick = async () => {
+  const picks = [...document.querySelectorAll('.pick')].filter(el => el.checked).map(el => el.dataset.path);
+  const targets = picks.length ? picks : [state.libPath];
+  const limit = Number($('limitN').value || 0);
+  let total = 0;
+  try {
+    notice('正在入队…');
+    for (const p of targets) {
+      const r = await api('/api/enqueue', 'POST', {path: p, force: true, limit});
+      total += r.queued;
+    }
+    notice(`已入队 ${total} 部。任务会按队列一部一部往下跑。`);
+    loadLibrary(state.libPath);
+    refreshStats();
+  } catch (e) { notice('入队失败：' + e.message); }
+};
+$('reindex').onclick = async () => {
+  try {
+    notice('正在索引…（大目录可能要几十秒）');
+    const r = await api('/api/scan', 'POST');
+    notice(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部。${r.auto_enqueue ? '' : '索引只统计，不会自动排队——请勾选目录后点「加入队列」。'}`);
+    loadLibrary(state.libPath);
+    refreshStats();
+  } catch (e) { notice(e.message); }
+};
+$('scan').onclick = async () => {
+  try {
+    notice('正在索引…');
+    const r = await api('/api/scan', 'POST');
+    notice(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部。`);
+    refresh();
+  } catch (e) { notice(e.message); }
+};
+$('toggle').onclick = async () => {
+  try {
+    const paused = $('toggle').dataset.paused === '1';
+    await api(paused ? '/api/queue/resume' : '/api/queue/pause', 'POST', paused ? undefined : {reason:'手动暂停'});
+    refresh();
+  } catch (e) { notice(e.message); }
+};
+$('retryAll').onclick = async () => {
+  try { const r = await api('/api/jobs/retry-failed', 'POST'); notice(`已重新排队 ${r.count} 个失败任务`); refresh(); }
+  catch (e) { notice(e.message); }
+};
+$('copyToken').onclick = async () => {
+  const v = $('tokenValue').value;
+  try { await navigator.clipboard.writeText(v); notice('token 已复制'); }
+  catch { $('tokenValue').select(); notice('已选中，按 Ctrl+C 复制'); }
+};
+$('rotateToken').onclick = async () => {
+  if (!confirm('重新生成后旧 token 立即失效，确定？')) return;
+  try { const r = await api('/api/ai/token/rotate', 'POST', {}); $('tokenValue').value = r.token; notice('新 token 已生成'); }
+  catch (e) { notice(e.message); }
+};
+$('aiform').onsubmit = async e => {
+  e.preventDefault();
+  const f = e.target.elements;
+  try {
+    await api('/api/settings', 'PUT', {
+      web_public_url: f.namedItem('web_public_url').value,
+      api_token_readonly: f.namedItem('api_token_readonly').checked
+    });
+    notice('接入设置已保存');
+  } catch (err) { notice(err.message); }
+};
+$('close').onclick = () => $('dlg').close();
+$('settings').onsubmit = async e => {
+  e.preventDefault();
+  const data = {};
+  for (const el of e.target.elements) {
+    if (!el.name) continue;
+    data[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+  }
+  try { await api('/api/settings', 'PUT', data); notice('设置已保存，下一次领取任务即生效'); refreshStats(); }
+  catch (err) { notice(err.message); }
+};
+
+show('lib');
+loadLibrary('');
+refreshStats();
+setInterval(() => { if (!$('jobsView').hidden) refresh(); else refreshStats(); }, 4000);
+</script>
+</body>
+</html>

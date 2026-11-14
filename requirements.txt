@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+apscheduler>=3.10,<4
+faster-whisper>=1.1,<2
+# 必须锁 av<19：faster-whisper 调用 av.open(..., metadata_errors="ignore")，
+# PyAV 19 移除了该参数，会让所有转写报
+# TypeError: open() got an unexpected keyword argument 'metadata_errors'
+av>=15,<19
+httpx>=0.27,<1

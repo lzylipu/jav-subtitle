@@ -1,0 +1,29 @@
+# 依赖与构建产物
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 运行时数据（数据库、模型、音频中间文件、日志）
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# 本地配置：只提交 .env.example
+.env
+.env.*
+!.env.example
+
+# 媒体与字幕
+*.srt
+*.wav
+*.mp4
+*.mkv
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
