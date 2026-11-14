@@ -29,14 +29,35 @@
 
 ## 🚀 三步部署
 
-```bash
-git clone <本仓库>
-cd nas-subtitle-v3
+### 方式 A：拉现成镜像（不构建，最快）
 
-cp .env.example .env
+镜像由 GitHub Actions 自动构建推送，改代码即自动出新的 `latest`。
+
+```bash
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/.env.example
+
+mv .env.example .env
 # 只改两行：
 #   MEDIA_DIR=/volume1/video     ← 你放影片的目录
 #   WEB_PASSWORD=你想设的密码
+
+docker compose -f compose.image.yaml up -d
+```
+
+| 仓库 | 地址 |
+|---|---|
+| Docker Hub（主） | `lzylipu/nas-subtitle-pipeline:latest` |
+| GHCR（镜像） | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+
+### 方式 B：本地构建
+
+```bash
+git clone <本仓库>
+cd nas-subtitle-pipeline
+
+cp .env.example .env
+# 同样只改 MEDIA_DIR 和 WEB_PASSWORD
 
 docker compose up -d --build
 ```
@@ -44,6 +65,18 @@ docker compose up -d --build
 打开 `http://<NAS地址>:8000`，浏览器会弹 Basic 登录框，用户名 `admin`，密码就是 `WEB_PASSWORD`。
 
 首次启动会自动下载 whisper 模型（`small` 约 460MB）到 `./data/models`，走 `HF_HOME`，国内建议先配镜像源。
+
+---
+
+## 🔄 自动构建
+
+`.github/workflows/build-and-push.yml`：push 到 `main` 或打 `v*` tag 时触发。
+
+1. **test** — Python 3.12 跑全部单元测试，不通过就不构建
+2. **build** — 构建 `linux/amd64` 镜像，同时推 Docker Hub 和 GHCR
+3. tag 规则：`latest`（默认分支）、`v3.0.0`（git tag）、`sha-45b9da7`（每次提交）
+
+需要两个仓库 secret：`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`（Docker Hub → Account Settings → Security → New Access Token，权限选 **Read & Write**）。
 
 ---
 

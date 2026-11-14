@@ -1,8 +1,15 @@
-# 直接用 GitHub 构建好的镜像（不本地构建，拉下来就跑）
-# 用法：cp .env.example .env && 改 MEDIA_DIR / WEB_PASSWORD && docker compose -f compose.ghcr.yaml up -d
+# 直接拉现成镜像跑，不本地构建（推荐给不想装构建环境的人）
+#
+#   cp .env.example .env      # 改 MEDIA_DIR / WEB_PASSWORD
+#   docker compose -f compose.image.yaml up -d
+#
+# 镜像由 GitHub Actions 自动构建：改代码 push 到 main 即自动测试 → 构建 → 推 Docker Hub。
+# Docker Hub（主）: lzylipu/nas-subtitle-pipeline
+# GHCR（镜像）    : ghcr.io/lzylipu/nas-subtitle-pipeline
 services:
   subtitle:
-    image: ghcr.io/lzylipu/nas-subtitle-pipeline:latest
+    # 想用 GHCR 镜像就把下一行换成 ghcr.io/lzylipu/nas-subtitle-pipeline:latest
+    image: lzylipu/nas-subtitle-pipeline:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
@@ -22,6 +29,7 @@ services:
       DAILY_CHAR_BUDGET: ${DAILY_CHAR_BUDGET:-0}
       TZ: Asia/Shanghai
     volumes:
+      # 必须是 rw：字幕要写在影片同目录（程序只创建 *.srt，不改视频）
       - ${MEDIA_DIR:?Set MEDIA_DIR in .env}:/media
       - ./data:/data
     stop_grace_period: 60s

@@ -29,14 +29,35 @@ An end-to-end pipeline that turns Japanese films/dramas on your NAS into Simplif
 
 ## 🚀 Three-step deployment
 
-```bash
-git clone <this repo>
-cd nas-subtitle-v3
+### Option A: pull the prebuilt image (no build needed)
 
-cp .env.example .env
+Images are built and pushed automatically by GitHub Actions on every push to `main`.
+
+```bash
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/.env.example
+
+mv .env.example .env
 # edit only two lines:
 #   MEDIA_DIR=/volume1/video     ← your video folder
 #   WEB_PASSWORD=a-long-password
+
+docker compose -f compose.image.yaml up -d
+```
+
+| Registry | Image |
+|---|---|
+| Docker Hub (primary) | `lzylipu/nas-subtitle-pipeline:latest` |
+| GHCR (mirror) | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+
+### Option B: build locally
+
+```bash
+git clone <this repo>
+cd nas-subtitle-pipeline
+
+cp .env.example .env
+# same two edits: MEDIA_DIR and WEB_PASSWORD
 
 docker compose up -d --build
 ```
@@ -44,6 +65,18 @@ docker compose up -d --build
 Open `http://<nas-ip>:8000`. The browser prompts for Basic auth: user `admin`, password from `WEB_PASSWORD`.
 
 First boot downloads the Whisper model (`small`, ~460 MB) into `./data/models` (via `HF_HOME`).
+
+---
+
+## 🔄 Automated builds
+
+`.github/workflows/build-and-push.yml` runs on every push to `main` and on `v*` tags:
+
+1. **test** — runs the full unit-test suite on Python 3.12; no green tests, no image
+2. **build** — builds `linux/amd64`, pushes to both Docker Hub and GHCR
+3. tags: `latest` (default branch), `v3.0.0` (git tag), `sha-45b9da7` (per commit)
+
+Requires two repo secrets: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (Docker Hub → Account Settings → Security → New Access Token, scope **Read & Write**).
 
 ---
 
