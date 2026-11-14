@@ -10,15 +10,13 @@ Docker 20.10.24，`docker-compose` 1.29.2。
 ## 一、单元测试
 
 ```
-$ docker run --rm -v /root/nas-subtitle-v3/tests:/srv/tests \
-    -e WEB_PASSWORD=test nas-subtitle-v3_subtitle:latest \
-    sh -c 'cd /srv && PYTHONPATH=/srv:/srv/tests python -m unittest discover -s tests'
-...................................
-Ran 35 tests in 8.219s
+$ cd tests && PYTHONPATH=.. python3 -m unittest discover -s .
+........................................................
+Ran 55 tests in 10.022s
 OK
 ```
 
-宿主机同样 35 项全过。覆盖范围：
+宿主机与镜像内各跑一遍，均 55 项全过。覆盖范围：
 
 | 类别 | 用例 |
 |---|---|
@@ -28,6 +26,8 @@ OK
 | 鉴权 | Bearer 通过、错 token 401、只读 token 写操作 403、Basic 通过、错密码 401 |
 | 安全 | 拒绝写非 `.srt`、原子写不留临时文件、默认设置无密钥、默认并发为 1 |
 | 阶段 | 预算熔断、复用已有日文字幕、音频丢失回退、翻译写 SRT 且命中 TM |
+| **设备识别（14 项）** | 无 GPU 判 0、有 GPU 带型号/显存、ctranslate2 抛错不崩、auto 选 cuda、auto 回退 cpu、显存 <4GB 降 int8_float16、强制 cuda 无设备时回退、强制 cpu 优先、显式精度被尊重、显式线程被尊重、非法值落回 auto、`to_dict()` 可 JSON 序列化、`get_model` 真把 device 传下去、默认设置是 auto |
+| **自动口令（6 项）** | 缺口令自动生成、重启复用同一口令、env 优先于文件、文件权限 0600、目录不可写退内存、生成的口令真能通过 Basic 鉴权 |
 
 ---
 
