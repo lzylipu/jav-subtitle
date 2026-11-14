@@ -45,7 +45,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 只有一个镜像：自带 CUDA 库，有显卡用 GPU、没显卡用 CPU 由程序自己判断
+      # 只有一个镜像，纯 CPU，不打包任何 CUDA 库
       - id: meta
         uses: docker/metadata-action@v5
         with:
