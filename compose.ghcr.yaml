@@ -1,0 +1,27 @@
+# 直接用 GitHub 构建好的镜像（不本地构建，拉下来就跑）
+# 用法：cp .env.example .env && 改 MEDIA_DIR / WEB_PASSWORD && docker compose -f compose.ghcr.yaml up -d
+services:
+  subtitle:
+    image: ghcr.io/lzylipu/nas-subtitle-pipeline:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      MEDIA_ROOT: /media
+      DATA_DIR: /data
+      WEB_USER: admin
+      WEB_PASSWORD: ${WEB_PASSWORD:?Set WEB_PASSWORD in .env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ASR_WORKERS: ${ASR_WORKERS:-1}
+      TRANSLATE_WORKERS: ${TRANSLATE_WORKERS:-1}
+      EXTRACT_WORKERS: ${EXTRACT_WORKERS:-1}
+      TRANSLATE_RPM: ${TRANSLATE_RPM:-20}
+      TRANSLATE_MIN_INTERVAL: ${TRANSLATE_MIN_INTERVAL:-3}
+      DAILY_CHAR_BUDGET: ${DAILY_CHAR_BUDGET:-0}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${MEDIA_DIR:?Set MEDIA_DIR in .env}:/media
+      - ./data:/data
+    stop_grace_period: 60s
