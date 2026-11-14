@@ -337,8 +337,8 @@ async function loadDevice() {
     const d = await api('/api/device');
     line.innerHTML = `<b>固定使用 CPU，精度 int8</b> ｜ 线程 ${d.cpu_threads}` +
       (d.cpu_count ? ` ｜ 机器 ${d.cpu_count} 线程` : '') +
-      `<br><span style="opacity:.75">本程序不做显卡加速：CTranslate2 只支持 NVIDIA 显卡，` +
-      `Intel / AMD 的核显都用不上，只能 CPU 硬算。</span>`;
+      `<br><span style="opacity:.75">本程序固定用 CPU 跑，不做显卡加速：` +
+      `Intel 核显 / AMD 核显都不被转写引擎支持，装了也用不上。</span>`;
   } catch (e) {
     line.textContent = '读取失败：' + e.message;
   }
