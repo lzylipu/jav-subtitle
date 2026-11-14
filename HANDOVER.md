@@ -114,9 +114,32 @@
 6. **媒体目录必须可写**（字幕写在影片旁）。曾试过 `:ro` 挂载，结果 asr 阶段
    `[Errno 30] Read-only file system` —— 已改回可写，靠后缀白名单保证不碰视频。
 
-## 10. 下一步建议顺序
+## 10. 镜像与自动构建（已上线）
 
-1. 上真机：`docker compose up -d --build`，先在 UI 里把「只跑前 N 部」设 3，跑通再放开
+| 项 | 值 |
+|---|---|
+| 仓库 | https://github.com/lzylipu/nas-subtitle-pipeline |
+| Docker Hub（主） | `lzylipu/nas-subtitle-pipeline:latest` |
+| GHCR（镜像） | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+| 平台 | `linux/amd64`，9 层，348.7 MB |
+| 现有 tag | `latest` / `v3.0.0` / `sha-1368f55` — 三者同 digest `sha256:3e190970…` |
+
+`.github/workflows/build-and-push.yml`：**push `main` 或打 `v*` tag 自动触发**
+→ `test` job 先跑全部单测（不绿不构建）→ `build` job 构建并同时推 Docker Hub + GHCR。
+
+Repo secrets 已写入：`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`（Read & Write）。
+
+实测验证：
+- run `43605883246`(@45b9da7) / `43606686027`(@1368f55) / `43607217163`(@v3.0.0) 均 **success**
+- 匿名 `docker.io` 拉取：9 层全部 206/200 可读，无需任何凭据
+- 改一次 README 再 push，`latest` digest 立刻变化 → **"改代码自动出新镜像"链路已确认**
+
+## 11. 下一步建议顺序
+
+1. 上真机二选一：
+   - 拉现成镜像 `docker compose -f compose.image.yaml up -d`
+   - 或本地构建 `docker compose up -d --build`
+   先在 UI 里把「只跑前 N 部」设 3，跑通再放开
 2. 跑 `tools/bench.py` 拿到真实的 ×实时，回填工期
 3. 拿 2–3 部真片验收准确率，决定 `small` 还是 `medium`
 4. 观察 24 小时，看内存与 `data/pipeline.db` 增长
