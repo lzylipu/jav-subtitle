@@ -1,17 +1,15 @@
-# 拉现成镜像跑：只需要改「端口」和「路径」两处，其余全部首次运行时自动创建，
-# 之后登录 Web UI 在「设置」页里配（翻译接口、并发、限流、预算……）。
+# 只有一条命令，镜像也只有一个。
 #
 #   docker compose -f compose.image.yaml up -d
-#   docker compose -f compose.image.yaml logs subtitle | grep -A6 "首次启动"
+#   docker compose -f compose.image.yaml logs subtitle | grep -A6 首次启动
 #
-# 镜像由 GitHub Actions 自动构建：改代码 push 到 main 就自动测试 → 构建 → 推 Docker Hub。
-# Docker Hub（主）: lzylipu/nas-subtitle-pipeline
-# GHCR（镜像）    : ghcr.io/lzylipu/nas-subtitle-pipeline
+# 显卡由程序自己判断：识别到 GPU 就用 GPU，识别不到就用 CPU 硬算。
+# 需要改的只有下面两处：端口、影片目录。
+#
+# 镜像由 GitHub Actions 自动构建：改代码 push 到 main 即自动测试 → 构建 → 推 Docker Hub。
+# Docker Hub: lzylipu/nas-subtitle-pipeline     GHCR: ghcr.io/lzylipu/nas-subtitle-pipeline
 services:
   subtitle:
-    # 有 NVIDIA 显卡就换成 :latest-cuda（多约 1.2GB，装了 cublas/cudnn）；
-    # 程序每次启动都会自己探测：有可用 GPU 就用 GPU，没有就用 CPU，不需要改这里。
-    # 想用 GHCR 镜像就换成 ghcr.io/lzylipu/nas-subtitle-pipeline:latest
     image: lzylipu/nas-subtitle-pipeline:latest
     container_name: nas-subtitle
     restart: unless-stopped
@@ -24,12 +22,4 @@ services:
       - /volume1/video:/media
       # 数据目录：数据库、模型、登录口令都在这。目录不存在会自动建，删掉等于重装。
       - ./data:/data
-    # ---- 有显卡时取消下面这段注释，把 GPU 交给容器（配合 :latest-cuda 镜像）----
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
     stop_grace_period: 60s

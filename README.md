@@ -233,11 +233,12 @@ curl -X POST -H "Authorization: Bearer hs_xxx" \
 
 | 场景 | 结果 |
 |---|---|
-| 有 NVIDIA 显卡 + `:latest-cuda` 镜像 + 容器挂了 GPU | 自动用 GPU，精度 `float16` |
-| 有显卡但用的是 CPU 镜像 | 探测不到 CUDA 库 → 回退 CPU（不会崩） |
-| 显卡显存 < 4GB | 自动降到 `int8_float16`，防 OOM |
+| 有 NVIDIA 显卡 + 容器加了 `--gpus all` | 自动用 GPU，精度 `float16` |
+| 有 NVIDIA 显卡但没加 `--gpus all` | 容器看不到显卡 → 用 CPU，页面会提示要加这个参数 |
+| 显存 < 4GB | 自动降到 `int8_float16`，防 OOM |
 | 完全没有显卡（E3-1231v3 这类） | CPU + `int8`，线程数自动取 `min(4, 核数)` |
-| 手动在网页上选「强制 GPU」但没显卡 | 回退 CPU，并在那行字里写明原因 |
+| 手动「强制 GPU」但没显卡 | 回退 CPU，并在那行字里写明原因 |
+| **AMD / Intel 显卡** | **不支持**。ctranslate2 的 PyPI wheel 只有 CPU 和 CUDA 两种后端，`rocm`/`hip`/`opencl` 实测报 `unsupported device`，AMD 要另装 OpenNMT 单独发布的 ROCm wheel，跟 CUDA 版互斥，装不了同一个镜像 |
 
 `device` 和 `compute_type` 的默认值都是 `auto`，一般不用动。
 
@@ -254,10 +255,25 @@ curl -X POST -H "Authorization: Bearer hs_xxx" \
 
 ### 想用显卡
 
-1. 宿主机装好 NVIDIA 驱动 + nvidia-container-toolkit
-2. 镜像换成 `:latest-cuda`
-3. `compose.image.yaml` 里取消 `deploy:` 那段注释
-4. 启动后看「设置 → 转写」那行字，确认写的是 `GPU：显卡型号`
+镜像不用换，只有一件事要做：让容器能看到显卡。
+
+```bash
+# docker run 加一个参数
+docker run -d --name nas-subtitle --gpus all ...
+
+# docker compose 加这段
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+前置条件：宿主机的 NVIDIA 驱动 + nvidia-container-toolkit 装好。装好后启动，看「设置 → 转写」那行字是不是 `GPU：显卡型号`。
+
+没加 `--gpus all` 也不是错误，程序会用 CPU 跑完所有任务，只是慢。真正的报错只有一种：机器上装了 nvidia-container-toolkit 但没有 N 卡时加 `--gpus all`，docker 会拒绝启动——那种机器本来就不该加。
 
 真机上一条命令就能量出准数：
 

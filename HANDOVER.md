@@ -86,17 +86,22 @@
 
 | 决策 | 依据 |
 |---|---|
-| 有没有 GPU | `ctranslate2.get_cuda_device_count()`（PyPI 的 ctranslate2 wheel 带 CUDA 支持，运行时 dlopen 加载 cublas/cudnn；缺库/缺驱动时返回 0） |
+| 有没有 GPU | `ctranslate2.get_cuda_device_count()`（PyPI 的 ctranslate2 wheel 带 CUDA 支持，运行时 dlopen 加载 cublas/cudnn） |
+| 容器有没有拿到显卡 | 检查 `/dev/nvidiactl`、`/dev/nvidia0`；没有就在 `reason` 里提示「要加 --gpus all」，而不是笼统说没显卡 |
 | 显卡型号/显存 | `nvidia-smi --query-gpu=name,memory.total`，只用于展示和 `compute_type` 微调 |
 | 精度 | GPU → `float16`；显存 < 4096MB → `int8_float16`；CPU → `int8` |
 | 线程 | GPU → 1（只喂数据）；CPU → `min(4, 核数)` |
 | 强制 cuda 但没设备 | 回退 CPU，`reason` 里写明原因，任务照跑不报错 |
 
+**不支持 AMD / Intel 显卡**（已实测）：PyPI 的 ctranslate2 wheel 只有 CPU 和 CUDA 后端，
+`get_supported_compute_types("rocm"/"hip"/"opencl")` 全部返回 `unsupported device`。
+AMD 需要 OpenNMT 单独发布的 ROCm wheel，它和 CUDA 版互斥，无法塞进同一个镜像。
+
 - 设置项 `device`（auto/cuda/cpu）与 `compute_type`（auto/float16/int8_float16/int8/int8_float32/float32）默认都是 `auto`
 - `GET /api/device` 返回 `{device, compute_type, cpu_threads, reason, hardware{...}}`；`/api/stats` 里也带 `asr_device`
 - 改设备/精度/模型 → 服务端 `asr.clear_cache()`，旧模型（含显存那份）不会继续被用
-- 镜像两个 tag：`latest`（CPU，~1.1GB）与 `latest-cuda`（+cublas/cudnn，~2.3GB），
-  由 `Dockerfile` 的 `ARG WITH_CUDA` 控制；**程序代码完全相同**，跑哪种机器都能自适应
+- 镜像只有一个 `latest`（自带 cublas/cudnn，~2.3GB），不再分 CPU / CUDA 两个 tag；
+  是否用 GPU 完全由运行时探测决定，命令里不需要选版本
 
 ## 7. 实机实测（测试机：2 vCPU / 3GB / Debian 12 LXC）
 

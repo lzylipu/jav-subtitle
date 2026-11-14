@@ -94,6 +94,17 @@ def _nvidia_smi() -> tuple[list[str], list[int]]:
     return names, mems
 
 
+def _container_sees_nvidia_nodes() -> bool:
+    """容器里有没有被交给显卡设备节点。
+
+    docker 默认不把 /dev/nvidia* 给容器，必须启动时加 `--gpus all`。
+    区分这两种情况是为了给出人能看懂的提示：
+    - 没有节点 → 大概率是没加 --gpus，不是没显卡
+    - 有节点但探测到 0 → 才是真的没有可用显卡/驱动版本不匹配
+    """
+    return any(os.path.exists(p) for p in ("/dev/nvidiactl", "/dev/nvidia0"))
+
+
 def probe() -> DeviceInfo:
     """探测一次硬件。结果不缓存太久（页面刷新要能看到 GPU 插拔变化）。"""
     info = DeviceInfo(cpu_count=os.cpu_count() or 1)
@@ -112,7 +123,11 @@ def probe() -> DeviceInfo:
     if info.cuda_device_count <= 0:
         # 没有设备就没必要再问支持哪些类型（缺驱动时这句会抛错）
         if not info.cuda_error:
-            info.cuda_error = "未检测到 CUDA 设备（无显卡、无驱动、或容器未挂 --gpus）"
+            if _container_sees_nvidia_nodes():
+                info.cuda_error = "未检测到可用 CUDA 设备（驱动版本不匹配或显卡不被支持）"
+            else:
+                info.cuda_error = ("容器里看不到显卡设备。若这台机器装有 NVIDIA 显卡，"
+                                   "启动命令需要加 --gpus all；没有显卡则本来就用 CPU")
         return info
 
     try:

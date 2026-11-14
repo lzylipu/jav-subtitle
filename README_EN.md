@@ -184,11 +184,12 @@ Every boot probes the machine once; the result shows at the top of Settings → 
 
 | Situation | Result |
 |---|---|
-| NVIDIA GPU + `:latest-cuda` image + GPU passed to the container | Uses GPU at `float16` |
-| GPU present but the CPU image is running | No CUDA libs found → falls back to CPU (never crashes) |
+| NVIDIA GPU + container started with `--gpus all` | Uses GPU at `float16` |
+| NVIDIA GPU but no `--gpus all` | Container can't see the card → CPU; the UI tells you to add the flag |
 | GPU with < 4 GB VRAM | Downgrades to `int8_float16` to avoid OOM |
 | No GPU at all (e.g. E3-1231 v3) | CPU + `int8`, threads = `min(4, cores)` |
 | "Force GPU" selected with no GPU present | Falls back to CPU and says why |
+| **AMD / Intel GPU** | **Not supported.** The ctranslate2 wheel on PyPI ships only CPU and CUDA backends — `rocm`/`hip`/`opencl` all report `unsupported device`. AMD needs OpenNMT's separate ROCm wheel, which conflicts with the CUDA build, so one image cannot cover both |
 
 `device` and `compute_type` both default to `auto`; you normally never touch them.
 
@@ -204,10 +205,25 @@ Every boot probes the machine once; the result shows at the top of Settings → 
 
 ### Using a GPU
 
-1. Install the NVIDIA driver + nvidia-container-toolkit on the host
-2. Switch the image to `:latest-cuda`
-3. Uncomment the `deploy:` block in `compose.image.yaml`
-4. Confirm Settings → Transcription reads `GPU：<your card>`
+No image switch needed. One thing only: let the container see the card.
+
+```bash
+# docker run — add one flag
+docker run -d --name nas-subtitle --gpus all ...
+
+# docker compose — add this block
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+Prerequisite: NVIDIA driver + nvidia-container-toolkit on the host. Then check Settings → Transcription shows `GPU：<your card>`.
+
+Skipping `--gpus all` is not an error — everything still runs on CPU, just slower. The only hard failure is adding `--gpus all` on a host with the toolkit installed but no card, which docker refuses to start.
 
 Measure on your own box:
 
