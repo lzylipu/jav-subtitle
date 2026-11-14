@@ -33,6 +33,7 @@ class DeviceInfo:
     cuda_error: str = ""
     gpu_names: list[str] = field(default_factory=list)
     gpu_memory_mb: list[int] = field(default_factory=list)
+    dri_devices: list[str] = field(default_factory=list)
     cpu_count: int = 1
 
     @property
@@ -105,9 +106,24 @@ def _container_sees_nvidia_nodes() -> bool:
     return any(os.path.exists(p) for p in ("/dev/nvidiactl", "/dev/nvidia0"))
 
 
+def _dri_devices() -> list[str]:
+    """列出 /dev/dri 下的渲染节点（Intel / AMD 集显或独显）。
+
+    这个列表**不会**被用来加速 —— ctranslate2 没有 Intel/AMD 之外的可选后端，
+    它只支持 CPU 与 NVIDIA CUDA。这里探测纯粹是为了在界面上把话说清楚：
+    「你的机器有块核显，但这个程序用不上，所以走 CPU」，而不是让用户以为程序瞎了。
+    容器默认拿不到 /dev/dri，需要 `--device /dev/dri` 才看得到。
+    """
+    try:
+        return sorted(n for n in os.listdir("/dev/dri") if n.startswith(("renderD", "card")))
+    except OSError:
+        return []
+
+
 def probe() -> DeviceInfo:
     """探测一次硬件。结果不缓存太久（页面刷新要能看到 GPU 插拔变化）。"""
     info = DeviceInfo(cpu_count=os.cpu_count() or 1)
+    info.dri_devices = _dri_devices()
     try:
         import ctranslate2
     except Exception as exc:  # pragma: no cover - 依赖缺失
@@ -125,6 +141,9 @@ def probe() -> DeviceInfo:
         if not info.cuda_error:
             if _container_sees_nvidia_nodes():
                 info.cuda_error = "未检测到可用 CUDA 设备（驱动版本不匹配或显卡不被支持）"
+            elif info.dri_devices:
+                info.cuda_error = ("检测到 Intel/AMD 显卡（%s），但本程序不支持它们加速，"
+                                   "将使用 CPU" % "、".join(info.dri_devices))
             else:
                 info.cuda_error = ("容器里看不到显卡设备。若这台机器装有 NVIDIA 显卡，"
                                    "启动命令需要加 --gpus all；没有显卡则本来就用 CPU")
@@ -167,10 +186,14 @@ def resolve(requested_device: str = "auto",
         reason = "按设置强制使用 CPU"
     else:
         use_cuda = info.has_cuda
-        reason = ("自动识别到 %d 个 CUDA 设备，使用 GPU（%s）"
-                  % (info.cuda_device_count, "、".join(info.gpu_names) or "未命名")
-                  if use_cuda else
-                  "自动识别未发现可用 CUDA 设备，使用 CPU")
+        if use_cuda:
+            reason = ("自动识别到 %d 个 CUDA 设备，使用 GPU（%s）"
+                      % (info.cuda_device_count, "、".join(info.gpu_names) or "未命名"))
+        elif info.dri_devices:
+            reason = ("检测到 Intel/AMD 显卡（%s），本程序只支持 NVIDIA 显卡加速，"
+                      "改用 CPU 硬算" % "、".join(info.dri_devices))
+        else:
+            reason = "自动识别未发现可用 CUDA 设备，使用 CPU"
 
     device = "cuda" if use_cuda else "cpu"
 

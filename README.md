@@ -238,9 +238,19 @@ curl -X POST -H "Authorization: Bearer hs_xxx" \
 | 显存 < 4GB | 自动降到 `int8_float16`，防 OOM |
 | 完全没有显卡（E3-1231v3 这类） | CPU + `int8`，线程数自动取 `min(4, 核数)` |
 | 手动「强制 GPU」但没显卡 | 回退 CPU，并在那行字里写明原因 |
-| **AMD / Intel 显卡** | **不支持**。ctranslate2 的 PyPI wheel 只有 CPU 和 CUDA 两种后端，`rocm`/`hip`/`opencl` 实测报 `unsupported device`，AMD 要另装 OpenNMT 单独发布的 ROCm wheel，跟 CUDA 版互斥，装不了同一个镜像 |
+| **Intel 核显（N100 / N305 这类小主机）** | **用 CPU，不用核显**。理由见下 |
+| **AMD 显卡** | **不支持**。要另装 OpenNMT 单独发布的 ROCm wheel，跟 CUDA 版互斥，装不进同一个镜像 |
 
 `device` 和 `compute_type` 的默认值都是 `auto`，一般不用动。
+
+### 为什么 N100 的核显不参与转写
+
+faster-whisper 底下是 CTranslate2，它官方只提供三种后端：CPU、NVIDIA CUDA、AMD ROCm，**没有 Intel GPU 后端**。要让 Intel 核显跑 whisper，得把整个转写引擎换成 OpenVINO 版——那是另一套代码，镜像从 2.3GB 涨到 5GB 以上。
+
+而收益几乎没有：参考实测里，连 Intel Arc 独显（比 N100 的 24EU 核显强得多）用 OpenVINO 也只比 faster-whisper 纯 CPU 快 1.3 倍，而且编码器还得留在 CPU 跑。N100 是 4 核，纯 CPU 跑 `small`+`int8` 已经够用，核显大概率帮不上忙。
+
+所以：**N100 这类机器直接跑，什么都不用配**，程序会自动选 CPU + int8 + 4 线程。设置页那行字会写「检测到 Intel/AMD 显卡（renderD128），本程序只支持 NVIDIA 显卡加速，改用 CPU 硬算」，确认它没识别错就行。
+
 
 ### 纯 CPU 的现实（E3-1231v3 这类）
 

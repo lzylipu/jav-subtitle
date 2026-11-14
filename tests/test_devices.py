@@ -20,7 +20,9 @@ def fake_ct2(count=0, types=None, raises=None):
 class ProbeTests(unittest.TestCase):
     def test_no_gpu_gives_zero_devices(self):
         with mock.patch.dict("sys.modules", {"ctranslate2": fake_ct2(0)}), \
-             mock.patch.object(devices, "_nvidia_smi", return_value=([], [])):
+             mock.patch.object(devices, "_nvidia_smi", return_value=([], [])), \
+             mock.patch.object(devices, "_dri_devices", return_value=[]), \
+             mock.patch.object(devices, "_container_sees_nvidia_nodes", return_value=False):
             info = devices.probe()
         self.assertEqual(info.cuda_device_count, 0)
         self.assertFalse(info.has_cuda)
@@ -42,12 +44,60 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("no driver", info.cuda_error)
 
 
+class IntelAmdIgpuTests(unittest.TestCase):
+    """/dev/dri 上的 Intel/AMD 显卡（N100 的核显就是这种）不能被当成 CUDA 用。
+
+    探测它唯一的意义是把提示写清楚：机器里有显卡、但这程序加速不了、所以走 CPU。
+    绝不能因为看见了 /dev/dri 就误判 has_cuda。
+    """
+
+    def test_dri_listing_missing_dir_returns_empty(self):
+        with mock.patch("os.listdir", side_effect=OSError(2, "No such file")):
+            self.assertEqual(devices._dri_devices(), [])
+
+    def test_dri_listing_filters_render_and_card_nodes(self):
+        with mock.patch("os.listdir", return_value=["renderD128", "card0", "by-path", "vga"]):
+            self.assertEqual(devices._dri_devices(), ["card0", "renderD128"])
+
+    def test_intel_igpu_never_reported_as_cuda(self):
+        with mock.patch.dict("sys.modules", {"ctranslate2": fake_ct2(0)}), \
+             mock.patch.object(devices, "_nvidia_smi", return_value=([], [])), \
+             mock.patch.object(devices, "_dri_devices", return_value=["card0", "renderD128"]), \
+             mock.patch.object(devices, "_container_sees_nvidia_nodes", return_value=False):
+            info = devices.probe()
+        self.assertFalse(info.has_cuda)
+        self.assertEqual(info.dri_devices, ["card0", "renderD128"])
+        self.assertIn("Intel/AMD", info.cuda_error)
+
+    def test_intel_igpu_resolves_to_cpu_with_explanation(self):
+        with mock.patch.dict("sys.modules", {"ctranslate2": fake_ct2(0)}), \
+             mock.patch.object(devices, "_nvidia_smi", return_value=([], [])), \
+             mock.patch.object(devices, "_dri_devices", return_value=["renderD128"]), \
+             mock.patch.object(devices, "_container_sees_nvidia_nodes", return_value=False):
+            plan = devices.resolve("auto", "auto", None)
+        self.assertEqual(plan.device, "cpu")
+        self.assertEqual(plan.compute_type, "int8")
+        self.assertIn("CPU", plan.reason)
+        self.assertNotIn("CUDA", plan.reason)   # 别对着核显用户说 CUDA
+
+    def test_nvidia_nodes_present_but_no_device_mentions_gpus_flag(self):
+        with mock.patch.dict("sys.modules", {"ctranslate2": fake_ct2(0)}), \
+             mock.patch.object(devices, "_nvidia_smi", return_value=([], [])), \
+             mock.patch.object(devices, "_dri_devices", return_value=[]), \
+             mock.patch.object(devices, "_container_sees_nvidia_nodes", return_value=True):
+            info = devices.probe()
+        self.assertIn("驱动", info.cuda_error)
+
+
 class ResolveTests(unittest.TestCase):
     def _resolve(self, count, mem=None, device="auto", compute="auto", threads=None):
         with mock.patch.dict("sys.modules",
                              {"ctranslate2": fake_ct2(count, ["float16", "int8_float16"])}), \
              mock.patch.object(devices, "_nvidia_smi",
-                               return_value=(["NVIDIA GTX 1650"], mem or [4096])):
+                               return_value=(["NVIDIA GTX 1650"], mem or [4096])), \
+             mock.patch.object(devices, "_dri_devices", return_value=[]), \
+             mock.patch.object(devices, "_container_sees_nvidia_nodes",
+                               return_value=count > 0):
             return devices.resolve(device, compute, threads)
 
     def test_auto_picks_cuda_when_gpu_present(self):

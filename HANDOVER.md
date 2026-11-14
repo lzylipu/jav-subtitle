@@ -93,9 +93,16 @@
 | 线程 | GPU → 1（只喂数据）；CPU → `min(4, 核数)` |
 | 强制 cuda 但没设备 | 回退 CPU，`reason` 里写明原因，任务照跑不报错 |
 
-**不支持 AMD / Intel 显卡**（已实测）：PyPI 的 ctranslate2 wheel 只有 CPU 和 CUDA 后端，
-`get_supported_compute_types("rocm"/"hip"/"opencl")` 全部返回 `unsupported device`。
-AMD 需要 OpenNMT 单独发布的 ROCm wheel，它和 CUDA 版互斥，无法塞进同一个镜像。
+**Intel 核显（N100 这类小主机）与 AMD 显卡都不参与加速**（已实测）：CTranslate2 官方后端只有
+CPU / NVIDIA CUDA / AMD ROCm，**没有 Intel GPU 后端**；`get_supported_compute_types("rocm"/"hip"/"opencl")`
+全部返回 `unsupported device`。要让 Intel 核显跑 whisper 只能换成 OpenVINO 版引擎（另一套代码，
+镜像 2.3GB → 5GB+），而参考实测里连 Intel Arc 独显用 OpenVINO 也只有约 1.3× 提升，N100 的 24EU
+核显基本等于白折腾 —— 所以明确选择：**不接 Intel 核显，N100 直接用 CPU 跑**。
+
+程序仍会读 `/dev/dri`（需 `--device /dev/dri` 才可见），目的只是把提示写清楚：
+「检测到 Intel/AMD 显卡（renderD128），本程序只支持 NVIDIA 显卡加速，改用 CPU 硬算」，
+避免用户误以为程序没识别到硬件。`dri_devices` 字段在 `GET /api/device` 的 `hardware` 里可见，
+但**永远不会**被用来置 `has_cuda`。
 
 - 设置项 `device`（auto/cuda/cpu）与 `compute_type`（auto/float16/int8_float16/int8/int8_float32/float32）默认都是 `auto`
 - `GET /api/device` 返回 `{device, compute_type, cpu_threads, reason, hardware{...}}`；`/api/stats` 里也带 `asr_device`

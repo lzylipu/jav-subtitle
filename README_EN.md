@@ -189,9 +189,18 @@ Every boot probes the machine once; the result shows at the top of Settings → 
 | GPU with < 4 GB VRAM | Downgrades to `int8_float16` to avoid OOM |
 | No GPU at all (e.g. E3-1231 v3) | CPU + `int8`, threads = `min(4, cores)` |
 | "Force GPU" selected with no GPU present | Falls back to CPU and says why |
-| **AMD / Intel GPU** | **Not supported.** The ctranslate2 wheel on PyPI ships only CPU and CUDA backends — `rocm`/`hip`/`opencl` all report `unsupported device`. AMD needs OpenNMT's separate ROCm wheel, which conflicts with the CUDA build, so one image cannot cover both |
+| **Intel iGPU (N100 / N305 mini PCs)** | **Runs on CPU, iGPU is not used.** See below |
+| **AMD GPU** | **Not supported** — needs OpenNMT's separate ROCm wheel, which conflicts with the CUDA build, so one image cannot cover both |
 
 `device` and `compute_type` both default to `auto`; you normally never touch them.
+
+### Why the N100 iGPU is left out
+
+faster-whisper runs on CTranslate2, and CTranslate2 ships exactly three backends: CPU, NVIDIA CUDA, AMD ROCm. **There is no Intel GPU backend.** Using an Intel iGPU would mean swapping the whole ASR engine for an OpenVINO build — different code, image grows from 2.3 GB to 5 GB+.
+
+The payoff would be near zero anyway: even an Intel Arc discrete GPU (far stronger than the N100's 24-EU iGPU) reaches only ~1.3× over faster-whisper on CPU with OpenVINO, and the encoder still has to stay on the CPU. The N100 has four cores and runs `small` + `int8` fine on its own.
+
+So: **just start it on an N100, nothing to configure.** The service picks CPU + int8 + 4 threads automatically, and the settings page reports `Intel/AMD GPU detected (renderD128) ... falling back to CPU`.
 
 ### Reality on CPU-only hardware (e.g. Xeon E3-1231 v3)
 
