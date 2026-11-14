@@ -24,6 +24,8 @@ RUN if [ "$WITH_CUDA" = "1" ]; then \
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib
 
 COPY app ./app
+# tools/bench.py 要能直接在容器里跑，README 和交接文档里都承诺了这条命令
+COPY tools ./tools
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
