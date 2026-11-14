@@ -131,26 +131,9 @@ pre.help{background:#fff;border:1px solid #dbe4e1;border-radius:8px;padding:12px
         <label>文件稳定等待（秒）<input name="min_file_age" type="number" min="0" required></label>
       </fieldset>
 
-      <fieldset><legend>转写（faster-whisper，自动识别 GPU / CPU）</legend>
-        <div class="hint" id="devLine">正在探测硬件…</div>
-        <label>运行设备
-          <select name="device">
-            <option value="auto">自动（有 GPU 用 GPU，没有用 CPU）</option>
-            <option value="cuda">强制 GPU（不可用时自动回退 CPU）</option>
-            <option value="cpu">强制 CPU</option>
-          </select>
-        </label>
+      <fieldset><legend>转写（faster-whisper，纯 CPU）</legend>
+        <div class="hint" id="devLine">正在读取…</div>
         <label>模型<input name="whisper_model" required></label>
-        <label>精度
-          <select name="compute_type">
-            <option value="auto">自动（GPU→float16，CPU→int8）</option>
-            <option value="float16">float16（仅 GPU）</option>
-            <option value="int8_float16">int8_float16（GPU 显存紧张时）</option>
-            <option value="int8">int8（CPU 最快）</option>
-            <option value="int8_float32">int8_float32（CPU 折中）</option>
-            <option value="float32">float32（CPU 最慢最准）</option>
-          </select>
-        </label>
         <label>每实例线程数（0 = 自动）<input name="cpu_threads" type="number" min="0" max="64" required></label>
         <label>beam size（1 最快，5 更准）<input name="beam_size" type="number" min="1" max="10" required></label>
         <label>批推理大小（1 关闭批处理）<input name="asr_batch_size" type="number" min="1" max="32" required></label>
@@ -352,16 +335,12 @@ async function loadDevice() {
   const line = $('devLine');
   try {
     const d = await api('/api/device');
-    const hw = d.hardware || {};
-    const gpu = d.device === 'cuda'
-      ? `GPU：${(hw.gpu_names || []).join('、') || 'CUDA 设备'}`
-      : 'CPU';
-    const cores = hw.cpu_count ? `${hw.cpu_count} 线程` : '';
-    line.innerHTML = `<b>当前会使用：${gpu}</b> ｜ 精度 ${d.compute_type} ｜ 线程 ${d.cpu_threads}` +
-      (cores ? ` ｜ 机器 ${cores}` : '') +
-      `<br><span style="opacity:.75">${esc(d.reason || '')}</span>`;
+    line.innerHTML = `<b>固定使用 CPU，精度 int8</b> ｜ 线程 ${d.cpu_threads}` +
+      (d.cpu_count ? ` ｜ 机器 ${d.cpu_count} 线程` : '') +
+      `<br><span style="opacity:.75">本程序不做显卡加速：CTranslate2 只支持 NVIDIA 显卡，` +
+      `Intel / AMD 的核显都用不上，只能 CPU 硬算。</span>`;
   } catch (e) {
-    line.textContent = '硬件探测失败：' + e.message;
+    line.textContent = '读取失败：' + e.message;
   }
 }
 

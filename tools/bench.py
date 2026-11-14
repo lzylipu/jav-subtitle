@@ -19,18 +19,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import asr, devices  # noqa: E402
+from app import asr  # noqa: E402
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
     ap.add_argument("--model", default=os.getenv("WHISPER_MODEL", "small"))
-    ap.add_argument("--device", default="auto", choices=list(devices.DEVICE_CHOICES),
-                    help="auto = 有 GPU 用 GPU，没有用 CPU")
-    ap.add_argument("--compute", default="auto",
-                    help="auto / float16 / int8_float16 / int8 / int8_float32 / float32")
-    ap.add_argument("--threads", type=int, default=0, help="0 = 按设备自动")
+    ap.add_argument("--threads", type=int, default=0,
+                    help="CPU 线程数，0 = 自动取 min(4, 核数)")
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--beam", type=int, default=1)
     ap.add_argument("--seconds", type=float, default=0, help="只取前 N 秒，0 表示整片")
@@ -38,7 +35,7 @@ def main() -> int:
                     help="asr=只要转写；extract=只要抽音频；full=抽音频+转写")
     args = ap.parse_args()
 
-    plan = devices.resolve(args.device, args.compute, args.threads)
+    threads = asr.threads_for(args.threads)
 
     video = Path(args.video)
     if not video.is_file():
@@ -53,9 +50,8 @@ def main() -> int:
                         "-c", "copy", str(src)], check=True)
 
     media = asr.probe_duration(src) or args.seconds
-    print(f"样本：{src}  时长 {media:.1f}s  模型 {args.model}  设备 {plan.device}"
-          f"（{plan.compute_type}）  线程 {plan.cpu_threads}  批 {args.batch}")
-    print(f"判定：{plan.reason}")
+    print(f"样本：{src}  时长 {media:.1f}s  模型 {args.model}  CPU int8  线程 {threads}"
+          f"  批 {args.batch}")
 
     audio = tmp / "a.wav"
     t0 = time.time()
@@ -67,9 +63,8 @@ def main() -> int:
 
     t0 = time.time()
     segments, language, duration = asr.transcribe_audio(
-        audio, args.model, plan.compute_type, plan.cpu_threads, "ja",
+        audio, args.model, threads, "ja",
         beam_size=args.beam, batch_size=args.batch, total_duration=media,
-        device=plan.device,
     )
     asr_s = time.time() - t0
     print(f"转写：{asr_s:.1f}s  语言={language}  片段={len(segments)}  {media / asr_s:.2f}×实时")

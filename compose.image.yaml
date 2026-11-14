@@ -3,7 +3,7 @@
 #   docker compose -f compose.image.yaml up -d
 #   docker compose -f compose.image.yaml logs subtitle | grep -A6 首次启动
 #
-# 显卡由程序自己判断：识别到 GPU 就用 GPU，识别不到就用 CPU 硬算。
+# 转写固定走 CPU（本程序不做显卡加速），不需要 --gpus 之类的参数。
 # 需要改的只有下面两处：端口、影片目录。
 #
 # 镜像由 GitHub Actions 自动构建：改代码 push 到 main 即自动测试 → 构建 → 推 Docker Hub。

@@ -12,7 +12,7 @@
 
 - 不改、不删、不重命名原视频（每次写文件前后缀白名单校验，只允许 `.srt`）
 - 已有中文字幕跳过，默认不覆盖
-- 纯 CPU 跑（无核显/无 GPU 也能用）
+- **只用 CPU**，不需要显卡、不带 CUDA 库，N100 这类小主机直接跑
 - 面向几百到几千部长跑，崩了重启能续
 
 ## 2. 代码在哪
@@ -80,35 +80,26 @@
 - **部署面只剩端口和路径**：`compose.yaml` / `compose.image.yaml` 里没有 `environment:`
   整段，`MEDIA_ROOT` 走默认 `/media`，时区写进 Dockerfile 的 `ENV TZ`
 
-## 6.1 设备识别（GPU 优先，CPU 兜底）
+## 6.1 转写固定走 CPU
 
-`app/devices.py`。**没有任何地方写死 `device="cpu"`**——旧版本写死了，已修。
+**没有 GPU 分支，也不探测显卡**。v3.2 之前的 `app/devices.py`（CUDA 探测、`--gpus all` 提示、
+精度自动降级）已整个删除，`Settings` 里的 `device` / `compute_type` 也删了。
 
-| 决策 | 依据 |
+原因（已查证 + 实测）：faster-whisper 底下是 CTranslate2，官方后端只有 CPU / NVIDIA CUDA /
+AMD ROCm，**没有 Intel GPU 后端**；`get_supported_compute_types("rocm"/"hip"/"opencl")` 实测全部
+返回 `unsupported device`。用户主力机型是 N100 这类只有 Intel 核显的小主机，而要让核显参与
+转写必须换成 OpenVINO 版引擎（另一套代码、镜像 5GB+、参考实测连 Arc 独显也只快 1.3×），
+不划算 —— 所以决定：**只做 CPU，项目保持精简**。
+
+| 项 | 实现 |
 |---|---|
-| 有没有 GPU | `ctranslate2.get_cuda_device_count()`（PyPI 的 ctranslate2 wheel 带 CUDA 支持，运行时 dlopen 加载 cublas/cudnn） |
-| 容器有没有拿到显卡 | 检查 `/dev/nvidiactl`、`/dev/nvidia0`；没有就在 `reason` 里提示「要加 --gpus all」，而不是笼统说没显卡 |
-| 显卡型号/显存 | `nvidia-smi --query-gpu=name,memory.total`，只用于展示和 `compute_type` 微调 |
-| 精度 | GPU → `float16`；显存 < 4096MB → `int8_float16`；CPU → `int8` |
-| 线程 | GPU → 1（只喂数据）；CPU → `min(4, 核数)` |
-| 强制 cuda 但没设备 | 回退 CPU，`reason` 里写明原因，任务照跑不报错 |
-
-**Intel 核显（N100 这类小主机）与 AMD 显卡都不参与加速**（已实测）：CTranslate2 官方后端只有
-CPU / NVIDIA CUDA / AMD ROCm，**没有 Intel GPU 后端**；`get_supported_compute_types("rocm"/"hip"/"opencl")`
-全部返回 `unsupported device`。要让 Intel 核显跑 whisper 只能换成 OpenVINO 版引擎（另一套代码，
-镜像 2.3GB → 5GB+），而参考实测里连 Intel Arc 独显用 OpenVINO 也只有约 1.3× 提升，N100 的 24EU
-核显基本等于白折腾 —— 所以明确选择：**不接 Intel 核显，N100 直接用 CPU 跑**。
-
-程序仍会读 `/dev/dri`（需 `--device /dev/dri` 才可见），目的只是把提示写清楚：
-「检测到 Intel/AMD 显卡（renderD128），本程序只支持 NVIDIA 显卡加速，改用 CPU 硬算」，
-避免用户误以为程序没识别到硬件。`dri_devices` 字段在 `GET /api/device` 的 `hardware` 里可见，
-但**永远不会**被用来置 `has_cuda`。
-
-- 设置项 `device`（auto/cuda/cpu）与 `compute_type`（auto/float16/int8_float16/int8/int8_float32/float32）默认都是 `auto`
-- `GET /api/device` 返回 `{device, compute_type, cpu_threads, reason, hardware{...}}`；`/api/stats` 里也带 `asr_device`
-- 改设备/精度/模型 → 服务端 `asr.clear_cache()`，旧模型（含显存那份）不会继续被用
-- 镜像只有一个 `latest`（自带 cublas/cudnn，~2.3GB），不再分 CPU / CUDA 两个 tag；
-  是否用 GPU 完全由运行时探测决定，命令里不需要选版本
+| 设备 | `WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=N)`，写死在 `app/asr.py` |
+| 线程 | `asr.threads_for(cpu_threads)`：设置为 0 时自动取 `min(4, 核数)` |
+| 可调项 | 只剩 `cpu_threads` / `beam_size` / `asr_batch_size` / `whisper_model`，都在 Web UI |
+| 换模型/线程 | 服务端调 `asr.clear_cache()`，旧实例不会继续被用 |
+| `GET /api/device` | 只回 `{device: "cpu", compute_type: "int8", cpu_threads, cpu_count}`，给人看的 |
+| 镜像 | 纯 CPU，**不含 cublas/cudnn**，约 1.1GB（之前含 CUDA 库时 2.3GB） |
+| 约束测试 | `tests/test_asr_cpu.py` 钉死「必须 cpu + int8」和「settings 不许再出现 device 字段」 |
 
 ## 7. 实机实测（测试机：2 vCPU / 3GB / Debian 12 LXC）
 

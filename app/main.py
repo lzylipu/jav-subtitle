@@ -205,8 +205,6 @@ app = FastAPI(title="NAS 日中字幕流水线", lifespan=lifespan,
 class SettingsPatch(BaseModel):
     media_root: str | None = None
     whisper_model: str | None = None
-    device: str | None = None
-    compute_type: str | None = None
     cpu_threads: int | None = None
     beam_size: int | None = None
     asr_batch_size: int | None = None
@@ -279,8 +277,8 @@ def set_settings(patch: SettingsPatch):
         data[key] = value
     updated = Settings.from_dict(data)
     save_settings(updated)
-    # 设备或精度变了就把已加载的模型丢掉，否则旧模型（尤其是显存里那份）会一直沿用
-    if any(k in changes for k in ("device", "compute_type", "cpu_threads", "whisper_model")):
+    # 模型或线程数变了就把已加载的实例丢掉，否则旧实例会一直沿用
+    if any(k in changes for k in ("cpu_threads", "whisper_model")):
         asr.clear_cache()
     pipeline.invalidate_settings_cache()
     reschedule()
@@ -289,9 +287,8 @@ def set_settings(patch: SettingsPatch):
 
 @app.get("/api/device")
 def get_device():
-    """这台机器到底会用 GPU 还是 CPU —— 界面上那行提示读这里。"""
-    settings = load_settings()
-    return pipeline.device_summary(settings)
+    """转写固定用 CPU，这里只回线程数给界面显示。"""
+    return pipeline.device_summary(load_settings())
 
 
 # ------------------------------------------------------------------ scanning

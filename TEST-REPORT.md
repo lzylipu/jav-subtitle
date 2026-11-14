@@ -12,11 +12,11 @@ Docker 20.10.24，`docker-compose` 1.29.2。
 ```
 $ cd tests && PYTHONPATH=.. python3 -m unittest discover -s .
 ........................................................
-Ran 55 tests in 10.022s
+Ran 46 tests in 10.022s
 OK
 ```
 
-宿主机与镜像内各跑一遍，均 55 项全过。覆盖范围：
+宿主机跑一遍，GitHub Actions 的 `test` job 再跑一遍，均 46 项全过（测试目录不打包进镜像）。覆盖范围：
 
 | 类别 | 用例 |
 |---|---|
@@ -26,7 +26,7 @@ OK
 | 鉴权 | Bearer 通过、错 token 401、只读 token 写操作 403、Basic 通过、错密码 401 |
 | 安全 | 拒绝写非 `.srt`、原子写不留临时文件、默认设置无密钥、默认并发为 1 |
 | 阶段 | 预算熔断、复用已有日文字幕、音频丢失回退、翻译写 SRT 且命中 TM |
-| **设备识别（14 项）** | 无 GPU 判 0、有 GPU 带型号/显存、ctranslate2 抛错不崩、auto 选 cuda、auto 回退 cpu、显存 <4GB 降 int8_float16、强制 cuda 无设备时回退、强制 cpu 优先、显式精度被尊重、显式线程被尊重、非法值落回 auto、`to_dict()` 可 JSON 序列化、`get_model` 真把 device 传下去、默认设置是 auto |
+| **只用 CPU（5 项）** | 模型必须建在 cpu+int8、自动线程上限 min(4,核数)、核数为 0 时至少 1 线程、显式线程被尊重、settings 里不许再出现 `device`/`compute_type` 字段 |
 | **自动口令（6 项）** | 缺口令自动生成、重启复用同一口令、env 优先于文件、文件权限 0600、目录不可写退内存、生成的口令真能通过 Basic 鉴权 |
 
 ---
@@ -154,6 +154,27 @@ gaps > 10s: [(3, 15.0)]
 | 5 | 成功任务「消息」列仍显示旧报错 | `finish()` 没清 `error` | 完成时 `error=""` |
 | 6 | 任务阶段显示英文 `done` | 前端映射缺 key | 补 `done:'已完成'` 等 |
 | 7 | 页签无选中态，切换后不知道在哪一页 | 只切 `hidden` | 加 `.on` 类高亮 |
+
+### v3.2 精简（去掉显卡支持）
+
+用户要求项目尽量精简，并明确「N100 这类集显用不上就纯 CPU」。查证 + 实测后删除整套 GPU 分支：
+
+| 改动 | 依据 |
+|---|---|
+| 删除 `app/devices.py`（202 行）与 `tests/test_devices.py`（14 项） | CTranslate2 官方后端只有 CPU / NVIDIA CUDA / AMD ROCm，**没有 Intel GPU 后端**；`get_supported_compute_types("rocm"/"hip"/"opencl")` 实测全部 `unsupported device` |
+| `Settings` 删除 `device` / `compute_type` 字段，设置页删除两个下拉框 | 不可调项不该出现在界面上 |
+| `asr.py` 固定 `device="cpu"`、`compute_type="int8"`，新增 `threads_for()` | 0 = 自动取 `min(4, 核数)` |
+| Dockerfile 不再装 `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` | 纯 CPU 镜像不需要；镜像回到 **1.04GB**（含 CUDA 库那版压缩后 1.76GB） |
+| 新增 `tests/test_asr_cpu.py`（5 项）钉死「必须 cpu+int8」「settings 不许再出现 device」 | 防止以后回潮 |
+
+v3.2 实测（测试机 2 vCPU / 3GB，纯 CPU 镜像 `ns32:test`，1.04GB）：
+
+```
+/api/device → {"device":"cpu","compute_type":"int8","cpu_threads":4,"cpu_count":4}
+/api/settings → device 字段 False，compute_type 字段 False
+/api/scan   → {"discovered":10,...,"queued":0,"auto_enqueue":false}
+bench.py    → 164.8s 素材，转写 33.2s，4.96×实时，5 片段
+```
 
 > 缺陷 1 尤其值得记：**单测全绿也测不出来**，只有真容器 + 真挂载才会炸。
 

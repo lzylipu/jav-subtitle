@@ -13,24 +13,11 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---- GPU 库（默认就装，镜像只有这一个，不分 CPU / CUDA 版本）----
-# ctranslate2 的 PyPI wheel 自带 CUDA 后端，是运行时 dlopen 加载 cublas / cudnn。
-# 把它们放进镜像后：
-#   有 NVIDIA 显卡 + 容器能看到显卡 → 自动用 GPU
-#   没有显卡 / 容器看不到显卡     → 自动回退 CPU（程序自己判断，不会崩）
-# 代价是镜像大 1.2GB，换来「一条命令跑两种机器」，不做版本区分。
-#
-# 固定路径 + LD_LIBRARY_PATH，不能用 import 取路径：
-# nvidia/cublas/lib 没有 __init__.py，不是 python 包。
-ENV NVIDIA_LIB_BASE=/usr/local/lib/python3.12/site-packages/nvidia
-RUN pip install --no-cache-dir nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*" \
-    && ls $NVIDIA_LIB_BASE/cublas/lib/libcublas.so.12 \
-          $NVIDIA_LIB_BASE/cudnn/lib/libcudnn.so.9
-
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib
-
+# 转写固定走 CPU + int8，镜像里不带任何 CUDA 库。
+# 原因：CTranslate2 只有 CPU / NVIDIA CUDA / AMD ROCm 三种后端，Intel 核显、AMD 核显
+# 都不支持；为显卡装 1.2GB 的 cublas/cudnn 只会让镜像变大、对 N100 这类机器毫无用处。
 COPY app ./app
-# tools/bench.py 要能直接在容器里跑，README 和交接文档里都承诺了这条命令
+# tools/bench.py 要能直接在容器里跑，README 里承诺了这条命令
 COPY tools ./tools
 
 EXPOSE 8000

@@ -8,7 +8,7 @@
 - 已有中文字幕自动跳过，不会覆盖
 - 单文件处理：`片名.mkv` + `片名.zh-CN.srt`，同目录并列
 - 适合**一次性几百到几千部**的长跑场景，崩了重启能续上
-- **GPU 自动识别**：有可用的 NVIDIA 显卡就用 GPU 转写，没有就回退 CPU；不需要改配置，网页上能看到实际用的是哪个
+- **只用 CPU**：不做显卡加速（CTranslate2 没有 Intel/AMD 核显后端），N100 这类小主机直接跑
 
 > 本项目**不包含任何 API 密钥**。翻译接口地址、模型、密钥全部在网页上填，只存在你本地数据库里。
 
@@ -145,8 +145,7 @@ docker compose logs subtitle | grep -A6 首次启动
 | 阶段 | 瓶颈 | 建议并发 |
 |---|---|---|
 | 抽音频 | 磁盘 IO | 1–2 |
-| 转写（CPU） | **CPU**，占满所有核 | 核数 ÷ 1（4 核就 1） |
-| 转写（GPU） | 显存 / 显卡算力 | 1–2，显存够再往上 |
+| 转写 | **CPU**，占满所有核 | 1（4 核机器再往上不加吞吐） |
 | 翻译 | **网络等待**，CPU 几乎不动 | 受上游限流约束，不是受机器约束 |
 
 ---
@@ -222,37 +221,26 @@ curl -X POST -H "Authorization: Bearer hs_xxx" \
 
 ---
 
-## 🖥 硬件：GPU 优先，CPU 兜底
+## 🖥 硬件要求：只用 CPU
 
-程序每次启动都会探测一次硬件，结果在「设置 → 转写」顶部那行字里显示：
+转写固定跑在 CPU 上，模型精度固定 `int8`。设置页「转写」那行字会显示实际线程数：
 
 ```
-当前会使用：CPU ｜ 精度 int8 ｜ 线程 4 ｜ 机器 8 线程
-自动识别未发现可用 CUDA 设备，使用 CPU
+固定使用 CPU，精度 int8 ｜ 线程 4 ｜ 机器 8 线程
 ```
 
-| 场景 | 结果 |
+**为什么不支持显卡**：faster-whisper 底下是 CTranslate2，它官方只提供三种后端——CPU、NVIDIA CUDA、AMD ROCm，**没有 Intel GPU 后端**。也就是说：
+
+| 硬件 | 本程序 |
 |---|---|
-| 有 NVIDIA 显卡 + 容器加了 `--gpus all` | 自动用 GPU，精度 `float16` |
-| 有 NVIDIA 显卡但没加 `--gpus all` | 容器看不到显卡 → 用 CPU，页面会提示要加这个参数 |
-| 显存 < 4GB | 自动降到 `int8_float16`，防 OOM |
-| 完全没有显卡（E3-1231v3 这类） | CPU + `int8`，线程数自动取 `min(4, 核数)` |
-| 手动「强制 GPU」但没显卡 | 回退 CPU，并在那行字里写明原因 |
-| **Intel 核显（N100 / N305 这类小主机）** | **用 CPU，不用核显**。理由见下 |
-| **AMD 显卡** | **不支持**。要另装 OpenNMT 单独发布的 ROCm wheel，跟 CUDA 版互斥，装不进同一个镜像 |
+| 任意 x86 CPU（含 N100 / N305 / E3 这类） | ✅ 能跑，就是 CPU 硬算 |
+| Intel 核显（N100 的 UHD 核显、Arc） | ❌ 用不上 |
+| AMD 核显 | ❌ 用不上 |
+| NVIDIA 独立显卡 | 技术上能走 CUDA，但为了让项目保持精简，**不接** |
 
-`device` 和 `compute_type` 的默认值都是 `auto`，一般不用动。
+要让 Intel 核显跑 whisper，得把整个转写引擎换成 OpenVINO 版——另一套代码，镜像从 1.1GB 涨到 5GB 以上，而参考实测里连 Intel Arc 独显用 OpenVINO 也只比纯 CPU 快 1.3 倍（编码器还得留在 CPU）。为了这点收益把项目搞得又大又复杂并不值当，所以明确选择：**只做 CPU，镜像是纯 CPU 镜像，不带任何 CUDA 库**。
 
-### 为什么 N100 的核显不参与转写
-
-faster-whisper 底下是 CTranslate2，它官方只提供三种后端：CPU、NVIDIA CUDA、AMD ROCm，**没有 Intel GPU 后端**。要让 Intel 核显跑 whisper，得把整个转写引擎换成 OpenVINO 版——那是另一套代码，镜像从 2.3GB 涨到 5GB 以上。
-
-而收益几乎没有：参考实测里，连 Intel Arc 独显（比 N100 的 24EU 核显强得多）用 OpenVINO 也只比 faster-whisper 纯 CPU 快 1.3 倍，而且编码器还得留在 CPU 跑。N100 是 4 核，纯 CPU 跑 `small`+`int8` 已经够用，核显大概率帮不上忙。
-
-所以：**N100 这类机器直接跑，什么都不用配**，程序会自动选 CPU + int8 + 4 线程。设置页那行字会写「检测到 Intel/AMD 显卡（renderD128），本程序只支持 NVIDIA 显卡加速，改用 CPU 硬算」，确认它没识别错就行。
-
-
-### 纯 CPU 的现实（E3-1231v3 这类）
+### CPU 上的现实
 
 | 项 | 说明 |
 |---|---|
@@ -262,28 +250,6 @@ faster-whisper 底下是 CTranslate2，它官方只提供三种后端：CPU、NV
 | 线程数 | 默认自动（`min(4, 核数)`）；想手动压就填具体数字，0 表示自动 |
 | 批推理 | 默认关。实测只快 34%，却会把 30 句并成 5 条 35 秒长字幕，**时间轴毁了** |
 | 厚度 | 一部 90 分钟片：转写约 5–9 分钟，翻译取决于接口 |
-
-### 想用显卡
-
-镜像不用换，只有一件事要做：让容器能看到显卡。
-
-```bash
-# docker run 加一个参数
-docker run -d --name nas-subtitle --gpus all ...
-
-# docker compose 加这段
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
-
-前置条件：宿主机的 NVIDIA 驱动 + nvidia-container-toolkit 装好。装好后启动，看「设置 → 转写」那行字是不是 `GPU：显卡型号`。
-
-没加 `--gpus all` 也不是错误，程序会用 CPU 跑完所有任务，只是慢。真正的报错只有一种：机器上装了 nvidia-container-toolkit 但没有 N 卡时加 `--gpus all`，docker 会拒绝启动——那种机器本来就不该加。
 
 真机上一条命令就能量出准数：
 
@@ -298,7 +264,7 @@ docker compose exec subtitle python tools/bench.py /media/某部片.mp4
 - Python 3.12 + FastAPI + Uvicorn
 - SQLite（WAL）+ `BEGIN IMMEDIATE` 原子领取任务，重启不丢队列
 - FFmpeg 抽音轨（16k 单声道 PCM）
-- faster-whisper（CTranslate2；有 GPU 用 GPU `float16`，没有用 CPU `int8`，运行时自动判定）
+- faster-whisper（CTranslate2，固定 CPU + `int8`）
 - httpx 调 OpenAI 兼容接口，JSON 结构化返回，二分拆分隔离毒批次
 - 单文件前端（无构建步骤），轮询刷新
 

@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import asr, devices
+from . import asr
 from .config import AUDIO_DIR, DATA_DIR, Settings
 from .db import (
     add_event, advance, claim, connect, counter_add, counter_get, fail, finish,
@@ -165,12 +166,11 @@ def handle_asr(job: dict, settings: Settings) -> None:
         last_push[0] = stamp
         update_job(job["id"], progress=10 + int(ratio * 60), message=(text or "")[:120])
 
-    plan = devices.resolve(settings.device, settings.compute_type, settings.cpu_threads)
     segments, language, duration = asr.transcribe_audio(
-        audio, settings.whisper_model, plan.compute_type, plan.cpu_threads,
+        audio, settings.whisper_model, asr.threads_for(settings.cpu_threads),
         settings.source_language, beam_size=settings.beam_size,
         batch_size=settings.asr_batch_size, progress=progress,
-        total_duration=job["duration"] or 0.0, device=plan.device,
+        total_duration=job["duration"] or 0.0,
     )
     frames = asr.transcript_to_cues(segments)
     if not frames:
@@ -424,9 +424,13 @@ def count_pending(scope: str | None = None) -> dict:
 
 
 def device_summary(settings: Settings) -> dict:
-    """给界面/接口用的一行话：这台机器最终会用 GPU 还是 CPU。"""
-    plan = devices.resolve(settings.device, settings.compute_type, settings.cpu_threads)
-    return plan.to_dict()
+    """给界面用的一行话：转写固定用 CPU，这里是实际会用的线程数。"""
+    return {
+        "device": "cpu",
+        "compute_type": "int8",
+        "cpu_threads": asr.threads_for(settings.cpu_threads),
+        "cpu_count": os.cpu_count() or 1,
+    }
 
 
 def stats() -> dict:
@@ -477,6 +481,6 @@ def stats() -> dict:
         "translate_api": limiter.snapshot(),
         "config_ready": bool(settings.openai_base_url and settings.openai_model
                              and settings.openai_api_key),
-        # 实际会用的设备与精度（有 GPU 就是 cuda，没有就是 cpu）
+        # 转写固定 CPU+int8，这里只是实际线程数，方便对照设置
         "asr_device": device_summary(settings),
     }

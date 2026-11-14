@@ -1,6 +1,7 @@
 """CPU audio extraction and Whisper transcription."""
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -14,8 +15,18 @@ except ImportError:  # pragma: no cover
     BatchedInferencePipeline = None  # type: ignore[assignment]
 
 # 每个线程一份模型实例：ctranslate2 内部有线程池，跨线程共享容易互相拖慢
-_CACHE: dict[tuple[int, str, str, int], tuple[WhisperModel, Any]] = {}
+_CACHE: dict[tuple[int, str, int], tuple[WhisperModel, Any]] = {}
 _CACHE_LOCK = threading.Lock()
+
+# 默认线程数上限。再多收益递减，还会跟翻译/抽音频抢内存带宽。
+MAX_AUTO_THREADS = 4
+
+
+def threads_for(cpu_threads: int) -> int:
+    """设置里 0 表示自动：取 min(4, 核数)。"""
+    if cpu_threads and cpu_threads > 0:
+        return int(cpu_threads)
+    return max(1, min(MAX_AUTO_THREADS, os.cpu_count() or 1))
 
 
 def probe_duration(video: Path) -> float:
@@ -41,15 +52,17 @@ def extract_audio(video: Path, output: Path) -> None:
     )
 
 
-def get_model(name: str, device: str, compute_type: str, cpu_threads: int):
-    """按 (设备, 精度) 缓存模型；换设置就换一份，不混用。
+def get_model(name: str, cpu_threads: int):
+    """按 (模型, 线程数) 缓存模型；改设置就换一份，不混用。
 
-    device 由 devices.resolve() 决定（有 GPU 用 cuda，没有用 cpu），这里只负责执行。
+    固定 device="cpu" + compute_type="int8"：
+    CTranslate2 只支持 CPU / NVIDIA CUDA / AMD ROCm 三种后端，Intel 核显、AMD 核显
+    都不在里面，而为了用显卡换一套引擎并不值当（详见 README）。所以这条路只走 CPU。
     """
-    key = (threading.get_ident(), name, device, compute_type, cpu_threads)
+    key = (threading.get_ident(), name, cpu_threads)
     with _CACHE_LOCK:
         if key not in _CACHE:
-            model = WhisperModel(name, device=device, compute_type=compute_type,
+            model = WhisperModel(name, device="cpu", compute_type="int8",
                                  cpu_threads=cpu_threads)
             batched = BatchedInferencePipeline(model=model) if BatchedInferencePipeline else None
             _CACHE[key] = (model, batched)
@@ -57,7 +70,7 @@ def get_model(name: str, device: str, compute_type: str, cpu_threads: int):
 
 
 def clear_cache() -> None:
-    """改设备/精度后调用，避免旧模型占着显存。"""
+    """改模型/线程数后调用，丢掉旧实例。"""
     with _CACHE_LOCK:
         _CACHE.clear()
 
@@ -65,16 +78,14 @@ def clear_cache() -> None:
 def transcribe_audio(
     audio: Path,
     model_name: str,
-    compute_type: str,
     cpu_threads: int,
     language: str,
     beam_size: int = 1,
     batch_size: int = 8,
     progress: Callable[[float, str], None] | None = None,
     total_duration: float = 0.0,
-    device: str = "auto",
 ) -> tuple[list[dict[str, Any]], str, float]:
-    model, batched = get_model(model_name, device, compute_type, cpu_threads)
+    model, batched = get_model(model_name, cpu_threads)
     kwargs: dict[str, Any] = dict(language=language or None, vad_filter=True, beam_size=beam_size)
 
     if batched is not None and batch_size > 1:

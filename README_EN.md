@@ -8,7 +8,7 @@ An end-to-end pipeline that turns Japanese films/dramas on your NAS into Simplif
 - Skips files that already have Chinese subtitles; never overwrites by default
 - Output layout: `Movie.mkv` + `Movie.zh-CN.srt` in the same folder
 - Built for **hundreds to thousands** of files running for days or weeks; survives restarts
-- Runs on **CPU only** (no GPU required) — and uses a GPU automatically when one is available
+- Runs on **CPU only** — no GPU or CUDA libraries required anywhere
 
 > This project ships with **no API keys**. Endpoint, model and key are configured in the web UI and stored only in your local SQLite database.
 
@@ -127,7 +127,6 @@ Each stage has **its own queue and worker pool**: while one file is transcribing
 |---|---|---|
 | Extract | disk I/O | 1–2 |
 | Transcribe (CPU) | **CPU** (saturates all cores) | 1 on a 4-core box |
-| Transcribe (GPU) | VRAM / SM throughput | 1–2, more only if VRAM allows |
 | Translate | **network wait** (CPU idle) | bounded by provider limits |
 
 All three default to `1`.
@@ -173,36 +172,26 @@ curl -X POST -H "Authorization: Bearer hs_xxx" -H "Content-Type: application/jso
 
 ---
 
-## 🖥 Hardware: GPU first, CPU fallback
+## 🖥 Hardware: CPU only
 
-Every boot probes the machine once; the result shows at the top of Settings → Transcription:
+Transcription always runs on the CPU at `int8`. Settings → Transcription shows the effective thread count:
 
 ```
-当前会使用：CPU ｜ 精度 int8 ｜ 线程 4 ｜ 机器 8 线程
-自动识别未发现可用 CUDA 设备，使用 CPU
+CPU only, int8 ｜ threads 4 ｜ machine 8 threads
 ```
 
-| Situation | Result |
+**Why no GPU support:** faster-whisper runs on CTranslate2, which ships exactly three backends — CPU, NVIDIA CUDA, AMD ROCm. There is **no Intel GPU backend**.
+
+| Hardware | This project |
 |---|---|
-| NVIDIA GPU + container started with `--gpus all` | Uses GPU at `float16` |
-| NVIDIA GPU but no `--gpus all` | Container can't see the card → CPU; the UI tells you to add the flag |
-| GPU with < 4 GB VRAM | Downgrades to `int8_float16` to avoid OOM |
-| No GPU at all (e.g. E3-1231 v3) | CPU + `int8`, threads = `min(4, cores)` |
-| "Force GPU" selected with no GPU present | Falls back to CPU and says why |
-| **Intel iGPU (N100 / N305 mini PCs)** | **Runs on CPU, iGPU is not used.** See below |
-| **AMD GPU** | **Not supported** — needs OpenNMT's separate ROCm wheel, which conflicts with the CUDA build, so one image cannot cover both |
+| Any x86 CPU (N100 / N305 / E3 etc.) | ✅ Works, on CPU |
+| Intel iGPU (N100 UHD Graphics, Arc) | ❌ Unusable |
+| AMD iGPU | ❌ Unusable |
+| NVIDIA discrete GPU | Technically CUDA-capable, but **deliberately not wired in** — keeping the project lean |
 
-`device` and `compute_type` both default to `auto`; you normally never touch them.
+Running whisper on an Intel iGPU means swapping the whole ASR engine for an OpenVINO build: different code, image grows from 1.1 GB to 5 GB+, and the reference benchmark shows even an Intel Arc discrete GPU only reaches ~1.3× over pure CPU with OpenVINO (the encoder still stays on the CPU). Not worth the complexity, so the image is a pure-CPU image with no CUDA libraries at all.
 
-### Why the N100 iGPU is left out
-
-faster-whisper runs on CTranslate2, and CTranslate2 ships exactly three backends: CPU, NVIDIA CUDA, AMD ROCm. **There is no Intel GPU backend.** Using an Intel iGPU would mean swapping the whole ASR engine for an OpenVINO build — different code, image grows from 2.3 GB to 5 GB+.
-
-The payoff would be near zero anyway: even an Intel Arc discrete GPU (far stronger than the N100's 24-EU iGPU) reaches only ~1.3× over faster-whisper on CPU with OpenVINO, and the encoder still has to stay on the CPU. The N100 has four cores and runs `small` + `int8` fine on its own.
-
-So: **just start it on an N100, nothing to configure.** The service picks CPU + int8 + 4 threads automatically, and the settings page reports `Intel/AMD GPU detected (renderD128) ... falling back to CPU`.
-
-### Reality on CPU-only hardware (e.g. Xeon E3-1231 v3)
+### Reality on CPU
 
 | Item | Note |
 |---|---|
@@ -212,28 +201,6 @@ So: **just start it on an N100, nothing to configure.** The service picks CPU + 
 | Threads | Automatic by default (`min(4, cores)`); set an explicit number to override, `0` = auto |
 | Batch inference | Off by default: 34% faster but merges 30 cues into 5 × 35-second blocks, destroying timing |
 
-### Using a GPU
-
-No image switch needed. One thing only: let the container see the card.
-
-```bash
-# docker run — add one flag
-docker run -d --name nas-subtitle --gpus all ...
-
-# docker compose — add this block
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
-
-Prerequisite: NVIDIA driver + nvidia-container-toolkit on the host. Then check Settings → Transcription shows `GPU：<your card>`.
-
-Skipping `--gpus all` is not an error — everything still runs on CPU, just slower. The only hard failure is adding `--gpus all` on a host with the toolkit installed but no card, which docker refuses to start.
-
 Measure on your own box:
 
 ```bash
@@ -242,7 +209,7 @@ docker compose exec subtitle python tools/bench.py /media/some-movie.mp4
 
 ## 🧱 Stack
 
-Python 3.12 · FastAPI · SQLite (WAL, `BEGIN IMMEDIATE` atomic claim) · FFmpeg · faster-whisper (CTranslate2; GPU `float16` when a GPU is available, CPU `int8` otherwise, decided at runtime) · httpx · single-file frontend, no build step.
+Python 3.12 · FastAPI · SQLite (WAL, `BEGIN IMMEDIATE` atomic claim) · FFmpeg · faster-whisper (CTranslate2, fixed CPU + `int8`) · httpx · single-file frontend, no build step.
 
 ## ⚠️ Known limits
 
