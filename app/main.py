@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import asr, cleanup, pipeline
+from . import asr, cleanup, pipeline, scraping
 from .config import DATA_DIR, Settings, settings_from_env
 from .db import (
     add_event, connect, init_db, job_events, load_settings, save_settings,
@@ -461,6 +461,11 @@ class SettingsPatch(BaseModel):
     translate_retries: int | None = None
     daily_char_budget: int | None = None
     tm_enabled: bool | None = None
+    scrape_enabled: bool | None = None
+    scrape_providers: str | None = None
+    scrape_prefer: str | None = None
+    subdl_api_key: str | None = None
+    opensubtitles_api_key: str | None = None
     schedule_enabled: bool | None = None
     schedule_hour: int | None = None
     schedule_minute: int | None = None
@@ -511,7 +516,8 @@ def set_settings(patch: SettingsPatch):
     current = load_settings()
     data = current.safe_dict()
     changes = patch.model_dump(exclude_none=True)
-    secret_fields = ("openai_api_key", "google_api_key", "deepl_api_key")
+    secret_fields = ("openai_api_key", "google_api_key", "deepl_api_key",
+                     "subdl_api_key", "opensubtitles_api_key")
     for key, value in changes.items():
         if key in secret_fields:
             if value == "********":
@@ -775,6 +781,46 @@ def clean_run(body: CleanBody):
     return result
 
 
+# ------------------------------------------------------------------ scraping
+
+
+class ScrapeTestBody(BaseModel):
+    name: str = ""            # 影片文件名或番号，留空用设置里第一个视频
+
+
+@app.get("/api/scrape/status")
+def scrape_status():
+    """每个字幕站现在能不能用、为什么不能用。"""
+    settings = load_settings()
+    return {"providers": scraping.provider_status(settings),
+            "order": scraping.parse_order(settings.scrape_providers)
+                     or scraping.default_order(),
+            "enabled": settings.scrape_enabled}
+
+
+@app.post("/api/scrape/test")
+def scrape_test(body: ScrapeTestBody):
+    """拿一个片名真跑一遍刮削，把每个平台的结果原样返回，方便判断该用哪个。"""
+    settings = load_settings()
+    name = body.name.strip()
+    if not name:
+        media_root = Path(settings.media_root).expanduser().resolve()
+        for current, _dirs, files in os.walk(media_root):
+            for candidate in files:
+                if candidate.lower().endswith((".mp4", ".mkv", ".avi", ".wmv", ".ts", ".mov")):
+                    name = candidate
+                    break
+            if name:
+                break
+    if not name:
+        raise HTTPException(400, "没有可测试的文件名，请手动填一个")
+    probe = Settings.from_dict({**settings.safe_dict(), "scrape_enabled": True})
+    result = scraping.scrape(name, probe)
+    return {"name": name, "ok": result.ok, "provider": result.provider,
+            "language": result.language, "cues": len(result.cues),
+            "source": result.source_name, "tried": result.tried}
+
+
 # ------------------------------------------------------------------ AI access
 
 
@@ -884,4 +930,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.8"}
+    return {"ok": True, "version": "3.9"}

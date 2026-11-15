@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import asr
+from . import asr, scraping, subtitles
 from .config import AUDIO_DIR, DATA_DIR, Settings
 from .db import (
     add_event, advance, claim, connect, counter_add, counter_get, fail, finish,
@@ -145,10 +145,57 @@ def handle_extract(job: dict, settings: Settings) -> None:
         advance(job["id"], "translate", 70, "复用已有日文字幕", ja_srt=str(japanese))
         return
 
+    # 先问一遍字幕站：有人做过就不用转写了。
+    # 124 分钟的片子转写要二三十分钟纯 CPU 时间，能省则省。
+    if settings.scrape_enabled and scrape_video(job, settings, video, target, japanese):
+        return
+
     audio = AUDIO_DIR / f"{job['id']}.wav"
     if not audio.exists() or audio.stat().st_size == 0:
         asr.extract_audio(video, audio)
     advance(job["id"], "asr", 10, "音频已提取", audio_path=str(audio))
+
+
+def scrape_video(job: dict, settings: Settings, video: Path,
+                 target: Path, japanese: Path) -> bool:
+    """先刮削字幕。返回 True 表示这个任务已经处理完了，调用方别再走转写。
+
+    - 找到中文：直接写成 .zh-CN.srt，任务完事；
+    - 找到日文：写成 .ja.srt，推进到翻译阶段（省掉最贵的转写）；
+    - 全都找不到：返回 False，老老实实抽音频转写。
+    """
+    update_job(job["id"], progress=8, message="正在字幕站查找现成字幕")
+    try:
+        result = scraping.scrape(video.name, settings, job.get("duration") or 0.0)
+    except Exception as exc:                      # noqa: BLE001 - 刮削坏了不能拖垮整条流水线
+        add_event(job["id"], f"刮削出错，改用转写：{type(exc).__name__}: {exc}", "warn")
+        return False
+
+    for line in result.tried:
+        add_event(job["id"], f"刮削 {line}", "info" if result.ok else "warn")
+
+    if not result.ok or not result.cues:
+        return False
+
+    rendered = subtitles.render_srt(result.cues)
+    if result.language == "zh":
+        subtitles.atomic_write(target, rendered, overwrite=True)
+        finish(job["id"], "done", "done",
+               f"刮削到中文字幕（{result.source_name}，{len(result.cues)} 条）",
+               zh_srt=str(target), char_count=sum(len(c.text) for c in result.cues))
+        add_event(job["id"], f"用 {result.provider} 的中文字幕，跳过转写和翻译", "info")
+        return True
+
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    working = WORK_DIR / f"{job['id']}.ja.srt"
+    subtitles.atomic_write(working, rendered, overwrite=True)
+    if settings.keep_japanese_srt:
+        subtitles.atomic_write(japanese, rendered, overwrite=True)
+    advance(job["id"], "translate", 70,
+            f"刮削到日文字幕（{result.source_name}，{len(result.cues)} 条），跳过转写",
+            ja_srt=str(working), detected_language="ja",
+            char_count=sum(len(c.text) for c in result.cues))
+    return True
 
 
 def handle_asr(job: dict, settings: Settings) -> None:

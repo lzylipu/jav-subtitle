@@ -108,7 +108,7 @@ def transcribe_audio(
     kwargs: dict[str, Any] = dict(language=language or None, vad_filter=True, beam_size=beam_size,
                                   condition_on_previous_text=False)
 
-    use_words = bool(word_timestamps) and batched is None
+    use_words = bool(word_timestamps) and not (batch_size > 1)
     if use_words:
         kwargs["word_timestamps"] = True
 

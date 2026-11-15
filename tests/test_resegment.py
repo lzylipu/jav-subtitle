@@ -85,12 +85,13 @@ class WordTimestampWiringTests(unittest.TestCase):
                 info = type("I", (), {"duration": 300.0, "language": "ja"})()
                 return iter([FakeSegment()]), info
 
-        class FakeBatched:  # 只要存在就会被当成批推理，默认设置下不该走这条
+        class FakeBatched:  # 真实环境里 BatchedInferencePipeline 永远存在，只是 batch_size<=1 不用它
             def transcribe(self, *a, **k):  # pragma: no cover
-                raise AssertionError("默认配置不该使用批推理")
+                raise AssertionError("batch_size=1 时不该走批推理")
 
         original = asr.get_model
-        asr.get_model = lambda *a, **k: (FakeModel(), None)
+        # 关键：这里必须返回非 None 的 batched，否则测不出「有 batched 但 batch_size=1」这条真实路径
+        asr.get_model = lambda *a, **k: (FakeModel(), FakeBatched())
         try:
             segments, _lang, _dur = asr.transcribe_audio(
                 __import__("pathlib").Path("/dev/null"), "small", 4, "ja",

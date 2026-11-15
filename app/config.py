@@ -80,6 +80,17 @@ class Settings:
     daily_char_budget: int = 0
     tm_enabled: bool = True
 
+    # ---------------- 刮削（先上网找现成字幕，找不到再转写）
+    # 开着的意义：124 分钟的片子转写要 20~40 分钟纯 CPU 时间，
+    # 如果本来就有人做过字幕，何必再算一遍。
+    scrape_enabled: bool = False
+    # 按顺序逐个搜，第一个对上的就停。留空 = 用默认顺序（跳过下不了的那几个）。
+    scrape_providers: str = "subtitlecat,kitsunekko"
+    # 分数一样时优先哪种：zh = 直接用现成中文字幕；ja = 拿日文原字幕自己翻
+    scrape_prefer: str = "zh"
+    subdl_api_key: str = ""
+    opensubtitles_api_key: str = ""
+
     # 扫描
     min_file_age: int = 120
     # 默认关闭：扫描只建索引，绝不偷偷把整个库排队。
@@ -107,7 +118,8 @@ class Settings:
 
     def safe_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for field in ("openai_api_key", "google_api_key", "deepl_api_key"):
+        for field in ("openai_api_key", "google_api_key", "deepl_api_key",
+                      "subdl_api_key", "opensubtitles_api_key"):
             data[field] = "********" if data.get(field) else ""
         return data
 
@@ -139,6 +151,11 @@ def settings_from_env() -> Settings:
         "DAILY_CHAR_BUDGET": "daily_char_budget",
         "TRANSLATE_RPM": "translate_rpm",
         "TRANSLATE_MIN_INTERVAL": "translate_min_interval",
+        "SCRAPE_ENABLED": "scrape_enabled",
+        "SCRAPE_PROVIDERS": "scrape_providers",
+        "SCRAPE_PREFER": "scrape_prefer",
+        "SUBDL_API_KEY": "subdl_api_key",
+        "OPENSUBTITLES_API_KEY": "opensubtitles_api_key",
         "WEB_PUBLIC_URL": "web_public_url",
     }
     for env_name, attr in mapping.items():

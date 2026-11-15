@@ -336,6 +336,33 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         </div>
       </fieldset>
 
+      <fieldset><div class="fsTitle">刮削字幕（先找现成的，找不到再转写）</div>
+        <label class="check"><input name="scrape_enabled" type="checkbox">开启刮削</label>
+        <label>优先要哪种
+          <select name="scrape_prefer">
+            <option value="zh">现成中文字幕（直接用，最省事）</option>
+            <option value="ja">日文原字幕（拿到后本地翻译，质量更可控）</option>
+          </select>
+        </label>
+        <label style="grid-column:1/-1">平台顺序（逗号分隔，从左到右逐个搜，第一个对上的就停）
+          <input name="scrape_providers" placeholder="subtitlecat,kitsunekko">
+          <small>可选：<b>subtitlecat</b>（这类影片实测 8/8 有中文）、kitsunekko（动漫）、subdl、opensubtitles（后两个要 key）。留空 = subtitlecat,kitsunekko。</small>
+        </label>
+        <label>SubDL API key（可选）<input name="subdl_api_key" type="password" autocomplete="new-password" placeholder="subdl.com 注册后拿"><small>它只有主流影视，这类片搜不到，不填也行</small></label>
+        <label>OpenSubtitles API key（可选）<input name="opensubtitles_api_key" type="password" autocomplete="new-password" placeholder="opensubtitles.com 注册后拿"><small>同上，注册要邮箱验证；不填就跳过这一站</small></label>
+        <div class="hint" style="grid-column:1/-1">
+          每个任务会先按上面的顺序问一遍字幕站：找到<b>中文</b>字幕直接写成 <span class="mono">.zh-CN.srt</span> 收工；
+          找到<b>日文</b>字幕就跳过最贵的转写，直接进翻译；全都找不到才回到「抽音频 → 转写 → 翻译」。
+          匹配只认番号一致或标题高度重合，再拿片长核一道，宁可没字幕也不给你配错。
+          刮到的字幕会剔掉字幕站塞的广告行和署名行。
+        </div>
+        <div class="bar" style="margin:10px 0 0;grid-column:1/-1">
+          <button type="button" class="ghost" id="scrapeTest">测试刮削</button>
+          <span class="hint" id="scrapeOut" style="flex:1 1 320px">点一下会拿库里第一个视频真去搜，把每个平台的结果原样列出来。</span>
+        </div>
+        <div class="hint" id="scrapeList" style="grid-column:1/-1">正在读取平台状态…</div>
+      </fieldset>
+
       <fieldset><div class="fsTitle">运行节奏（只读，程序自己定）</div>
         <div class="perf" id="perfGrid">正在读取…</div>
         <div class="hint" style="grid-column:1/-1">这些值是为了保证不打爆中转站、也不把 CPU 吃满而定的，不用你调。</div>
@@ -590,6 +617,7 @@ async function loadSettings() {
   syncProviderGroups();
   loadDevice();
   loadPerf();
+  loadScrapeStatus();
 }
 
 // 只读的性能/并发展示：这些参数不给用户改，只让用户知道现在是什么档位
@@ -947,6 +975,38 @@ function syncProviderGroups() {
   for (const g of document.querySelectorAll('.pgroup')) g.hidden = g.dataset.provider !== cur;
 }
 $('provider').onchange = syncProviderGroups;
+
+// ---------------------------------------------------------------- 刮削
+async function loadScrapeStatus() {
+  const box = $('scrapeList');
+  try {
+    const r = await api('/api/scrape/status');
+    box.innerHTML = (r.providers || []).map(p => {
+      const state = !p.enabled ? '未排进顺序'
+        : p.ready ? '可用' : p.reason;
+      const mark = p.enabled && p.ready ? '✓' : '·';
+      return `<span style="margin-right:14px"><span class="mono">${mark}</span> `
+        + `<b>${esc(p.label)}</b> — ${esc(state)}`
+        + `<span class="hint">（${esc(p.note)}）</span></span>`;
+    }).join('') || '没有可用平台';
+  } catch (e) { box.textContent = '读取失败：' + e.message; }
+}
+
+$('scrapeTest').onclick = async () => {
+  const out = $('scrapeOut');
+  out.textContent = '正在逐个平台搜索，可能要十几秒…';
+  try {
+    const r = await withBusy($('scrapeTest'), '搜索中…', () => api('/api/scrape/test', 'POST', {}));
+    const head = r.ok
+      ? `命中：${r.provider} · ${r.language === 'zh' ? '中文' : '日文'} · ${r.cues} 条 · 《${r.source}》`
+      : '五个平台都没有对得上的，这个片子会走转写';
+    out.innerHTML = `<b>${esc(head)}</b><br>` +
+      (r.tried || []).map(line => esc(line)).join('<br>');
+    toast(r.ok ? '刮削命中' : '刮削没找到，将走转写', r.ok ? 'ok' : 'info');
+  } catch (e) {
+    out.textContent = '测试失败：' + e.message;
+  }
+};
 
 $('testTr').onclick = async () => {
   const out = $('testTrOut');
