@@ -142,6 +142,12 @@ dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .tokenbox{display:flex;gap:8px;grid-column:1/-1;align-items:center}
 .tokenbox input{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+/* 清理面板：六项checkbox排两列，每项带一行灰字说明 */
+.cleanGrid{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 18px}
+.cleanGrid label.check{align-items:flex-start}
+.cleanGrid .cdesc{display:block;color:var(--muted);font-size:11.5px;line-height:1.4;margin-top:2px}
+button.danger{background:linear-gradient(180deg,#ff5f52,#e0342a);border-color:rgba(0,0,0,.12);color:#fff;font-weight:600}
+button.danger:disabled{opacity:.45;filter:grayscale(.5)}
 pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px;padding:12px;font-size:12px;overflow:auto;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 @media(min-width:761px){
   html,body{height:100%;overflow:hidden}
@@ -280,6 +286,11 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
           <option value="medium">medium —— 更准，慢约 2 倍</option>
           <option value="large-v3">large-v3 —— 最准，慢约 4 倍，建议 4GB 以上内存</option>
         </select></label>
+        <label>断句间隔（秒）<input name="asr_split_gap" type="number" min="0.1" max="3" step="0.1" required><small>说话停顿超过这个长度就断一条。0.7 是正常换气</small></label>
+        <label>单条最长秒数<input name="asr_max_cue_seconds" type="number" min="2" max="30" step="0.5" required><small>超了会在最近的句号处断开</small></label>
+        <label>单条最多个字<input name="asr_max_cue_chars" type="number" min="10" max="120" required></label>
+        <label class="check"><input name="asr_word_timestamps" type="checkbox">按词对齐时间轴（强烈建议开）</label>
+        <div class="hint" style="grid-column:1/-1">关掉会快约 20 倍，但一条字幕可能横跨好几分钟、和画面对不上——实测 15 句话会被压成 4 条。<b>除非只要个大意，否则别关。</b></div>
         <label class="check"><input name="keep_japanese_srt" type="checkbox">把日文字幕另存一份到影片旁边（方便校对）</label>
         <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有的中文字幕（默认不覆盖）</label>
         <div class="hint" id="devLine" style="grid-column:1/-1">正在读取…</div>
@@ -347,6 +358,31 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         <div class="hint" style="grid-column:1/-1">token 只存在服务端数据库里，不进代码仓库、不进 .env。请求头写 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 就能读状态、看日志、暂停队列、重试任务。</div>
       </fieldset>
       <button class="primary" type="submit">保存</button>
+    </form>
+
+    <form id="cleanForm">
+      <fieldset><div class="fsTitle">清理与重置</div>
+        <label style="grid-column:1/-1">作用范围
+          <div class="tokenbox">
+            <input id="cleanScope" placeholder="默认整个媒体根目录，可以填某个子目录的完整路径">
+            <button type="button" class="ghost mini" id="cleanUseLib">用当前浏览的目录</button>
+          </div>
+          <small>留空 = 整个媒体根目录。<b>原视频永远不会被删</b>，这里只删索引记录、任务记录和 .srt 字幕。</small>
+        </label>
+        <div class="cleanGrid">
+          <label class="check"><input type="checkbox" name="item" value="jobs" checked>任务记录<span class="cdesc">队列里的排队/完成/失败记录和它们的日志</span></label>
+          <label class="check"><input type="checkbox" name="item" value="index">媒体索引<span class="cdesc">扫描出来的文件清单，删了重新扫描就回来</span></label>
+          <label class="check"><input type="checkbox" name="item" value="subtitles">已生成的字幕<span class="cdesc">只删 <span class="mono">.ja.srt</span> 和 <span class="mono">.zh-CN.srt</span></span></label>
+          <label class="check"><input type="checkbox" name="item" value="work">临时工作文件<span class="cdesc">半成品日文字幕</span></label>
+          <label class="check"><input type="checkbox" name="item" value="audio">抽出来的音频<span class="cdesc">占空间最大的一块</span></label>
+          <label class="check"><input type="checkbox" name="item" value="tm">翻译记忆<span class="cdesc">翻过的台词缓存，清了下次要重新花钱</span></label>
+        </div>
+        <div class="bar" style="margin:12px 0 0;grid-column:1/-1">
+          <button type="button" class="ghost" id="cleanPreview">先看看会删什么</button>
+          <button type="button" class="danger" id="cleanRun" disabled>确认删除</button>
+          <span class="hint" id="cleanOut" style="flex:1 1 340px">点「先看看」会列出每一项的数量和占用空间，不会动手。</span>
+        </div>
+      </fieldset>
     </form>
 
     <h3 style="font-size:14px;margin:18px 0 8px">接口清单</h3>
@@ -762,6 +798,86 @@ $('aiform').onsubmit = async e => {
   } catch (err) { toast('保存失败：' + err.message, 'err'); }
 };
 $('close').onclick = () => $('dlg').close();
+
+// ---------------------------------------------------------------- 清理与重置
+// 两步走：先预览拿到每一项的数量，用户看过再点「确认删除」。
+// 没预览过时删除按钮是禁用的，避免手滑把跑了一半的任务清空。
+let cleanReady = null;
+
+function cleanItems() {
+  return [...document.querySelectorAll('#cleanForm input[name="item"]:checked')].map(el => el.value);
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
+function describeClean(r) {
+  const parts = [];
+  const it = r.items || {};
+  if (it.jobs) parts.push(`任务记录 ${it.jobs.count} 条` +
+    (Object.keys(it.jobs.by_status || {}).length ? `（${Object.entries(it.jobs.by_status).map(([k, v]) => `${statusText(k)} ${v}`).join('、')}）` : ''));
+  if (it.index) parts.push(`媒体索引 ${it.index.count} 条`);
+  if (it.subtitles) parts.push(`字幕 ${it.subtitles.count} 个 / ${fmtBytes(it.subtitles.bytes)}`);
+  if (it.work) parts.push(`临时文件 ${it.work.count} 个 / ${fmtBytes(it.work.bytes)}`);
+  if (it.audio) parts.push(`音频 ${it.audio.count} 个 / ${fmtBytes(it.audio.bytes)}`);
+  if (it.tm) parts.push(`翻译记忆 ${it.tm.count} 条`);
+  const scope = r.scope === r.root ? '整个媒体根目录' : r.scope;
+  return `范围：${scope}<br>会删除：${parts.length ? parts.join('；') : '没有可删的'}`;
+}
+
+$('cleanUseLib').onclick = () => {
+  $('cleanScope').value = state.libPath || '';
+  if (!state.libPath) toast('还没在媒体库里选过目录，先到「库与任务」点一个目录', 'info');
+  cleanReady = null;
+  $('cleanRun').disabled = true;
+};
+
+$('cleanPreview').onclick = async () => {
+  const items = cleanItems();
+  if (!items.length) { toast('至少勾一项', 'err'); return; }
+  const out = $('cleanOut');
+  out.textContent = '正在统计…';
+  try {
+    const q = new URLSearchParams({scope: $('cleanScope').value.trim(), items: items.join(',')});
+    const r = await api('/api/clean/preview?' + q);
+    out.innerHTML = describeClean(r);
+    const total = Object.values(r.items || {}).reduce((s, v) => s + (v.count || 0), 0);
+    cleanReady = {items, scope: r.scope};
+    $('cleanRun').disabled = total === 0;
+    if (total === 0) toast('这个范围内没有可删的东西', 'info');
+  } catch (e) {
+    out.textContent = '统计失败：' + e.message;
+    cleanReady = null;
+    $('cleanRun').disabled = true;
+  }
+};
+
+$('cleanRun').onclick = async () => {
+  if (!cleanReady) { toast('先点「先看看会删什么」', 'err'); return; }
+  if (!confirm(`确认删除？\n\n范围：${cleanReady.scope}\n\n原视频不会被删，但上面列出的记录和字幕删了就没了。`)) return;
+  const out = $('cleanOut');
+  try {
+    const r = await withBusy($('cleanRun'), '删除中…', () => api('/api/clean', 'POST', {
+      scope: $('cleanScope').value.trim(), items: cleanReady.items, confirm: true
+    }));
+    const done = Object.entries(r.items || {}).map(([k, v]) =>
+      `${CLEAN_LABEL[k] || k} ${v}`).join('；') || '无';
+    out.textContent = `已删除：${done}` + (r.errors?.length ? `｜有 ${r.errors.length} 个文件删不掉：${r.errors[0]}` : '');
+    toast('清理完成');
+    cleanReady = null;
+    $('cleanRun').disabled = true;
+    refresh(); loadLibrary(state.libPath || '');
+  } catch (e) { toast('清理失败：' + e.message, 'err'); }
+};
+
+const CLEAN_LABEL = {jobs: '任务记录', index: '媒体索引', subtitles: '字幕',
+                     work: '临时文件', audio: '音频', tm: '翻译记忆'};
+
 $('settings').onsubmit = async e => {
   e.preventDefault();
   const data = {};

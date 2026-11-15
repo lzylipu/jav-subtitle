@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import asr, pipeline
+from . import asr, cleanup, pipeline
 from .config import DATA_DIR, Settings, settings_from_env
 from .db import (
     add_event, connect, init_db, job_events, load_settings, save_settings,
@@ -438,6 +438,10 @@ class SettingsPatch(BaseModel):
     whisper_model: str | None = None
     cpu_threads: int | None = None
     beam_size: int | None = None
+    asr_word_timestamps: bool | None = None
+    asr_split_gap: float | None = None
+    asr_max_cue_seconds: float | None = None
+    asr_max_cue_chars: int | None = None
     asr_batch_size: int | None = None
     extract_workers: int | None = None
     asr_workers: int | None = None
@@ -726,6 +730,51 @@ def reset_limiter():
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ cleanup
+
+
+class CleanBody(BaseModel):
+    scope: str = ""              # 空 = 整个媒体根目录
+    items: list[str] = []        # jobs / index / subtitles / work / audio / tm
+    confirm: bool = False        # 必须显式 true 才真删
+
+
+@app.get("/api/clean/preview")
+def clean_preview(scope: str = "", items: str = ""):
+    """先看会删多少，不动手。items 用逗号分隔，空表示全部。"""
+    settings = load_settings()
+    wanted = [i.strip() for i in items.split(",") if i.strip()] or None
+    try:
+        return cleanup.preview(settings.media_root, scope,
+                               settings.target_language, wanted)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/clean/usage")
+def clean_usage():
+    return cleanup.disk_usage()
+
+
+@app.post("/api/clean")
+def clean_run(body: CleanBody):
+    """执行清理。没带 confirm=true 直接 400 —— 这个接口是真删文件，不能误触。"""
+    if not body.confirm:
+        raise HTTPException(400, "需要 confirm=true 才会执行清理")
+    if not body.items:
+        raise HTTPException(400, "items 不能为空")
+    known = [i for i in body.items if i in cleanup.ITEMS]
+    if not known:
+        raise HTTPException(400, f"不认识要清理的项：{body.items}")
+    settings = load_settings()
+    try:
+        result = cleanup.clean(settings.media_root, body.scope,
+                               settings.target_language, known)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
+
+
 # ------------------------------------------------------------------ AI access
 
 
@@ -835,4 +884,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.7"}
+    return {"ok": True, "version": "3.8"}

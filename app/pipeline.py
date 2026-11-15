@@ -172,6 +172,10 @@ def handle_asr(job: dict, settings: Settings) -> None:
         settings.source_language, beam_size=settings.beam_size,
         batch_size=settings.asr_batch_size, progress=progress,
         total_duration=job["duration"] or 0.0,
+        word_timestamps=settings.asr_word_timestamps,
+        split_gap=settings.asr_split_gap,
+        max_cue_seconds=settings.asr_max_cue_seconds,
+        max_cue_chars=settings.asr_max_cue_chars,
     )
     frames = asr.transcript_to_cues(segments)
     if not frames:
