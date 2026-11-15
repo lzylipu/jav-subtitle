@@ -12,11 +12,11 @@ Docker 20.10.24，`docker-compose` 1.29.2。
 ```
 $ docker run --rm -v $PWD:/src -w /src jav-subtitle:test python -m unittest discover -s tests
 ...................................................................................................
-Ran 117 tests in 132.4s
+Ran 119 tests in 132.8s
 OK
 ```
 
-容器里跑（宿主机没有 `faster_whisper`），GitHub Actions 的 `test` job 再跑一遍，均 117 项全过。
+容器里跑（宿主机没有 `faster_whisper`），GitHub Actions 的 `test` job 再跑一遍，均 119 项全过。
 
 > 测试目录不打包进镜像，跑测试要挂载源码：`-v $PWD:/src -w /src`。覆盖范围：
 

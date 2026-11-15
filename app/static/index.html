@@ -459,6 +459,10 @@ async function refreshStats() {
     $('toggle').textContent = s.paused ? '恢复队列' : '暂停队列';
     $('toggle').dataset.paused = s.paused ? '1' : '0';
     if (s.blocked) notice(s.blocked);
+    // 翻译接口刚报过错就直说，别让任务表停在 70% 让人干等
+    else if (lm.last_error && (lm.last_error_age < 0 || lm.last_error_age < 600)) {
+      notice(`翻译接口最近一次报错：${lm.last_error}（在「日志」页能看到完整过程）`);
+    }
     else if (!s.config_ready) {
       const p = s.translate_provider || 'openai';
       const hint = p === 'deepl'

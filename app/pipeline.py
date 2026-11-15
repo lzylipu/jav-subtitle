@@ -35,6 +35,10 @@ pause_info: dict[str, str] = {"reason": ""}
 budget_block_until: dict[str, float] = {"ts": 0.0}
 config_wait_until: dict[str, float] = {"ts": 0.0}
 config_wait_reason: dict[str, str] = {"text": ""}
+# 最近一次翻译阶段的错误。翻译引擎内部要重试几分钟才冒泡，
+# 这段时间任务表只显示进度不动，用户会以为「卡住了」——把它暴露到 /api/stats，
+# 前端直接显示「翻译接口最近一次报错：401 ...」
+last_translate_error = {"text": "", "ts": 0.0}   # type: dict
 _threads: list[threading.Thread] = []
 _local = threading.local()
 _settings_cache: dict[str, object] = {"ts": 0.0, "value": None}
@@ -245,8 +249,19 @@ def handle_translate(job: dict, settings: Settings) -> None:
         if missing:
             need = sum(len(texts[i]) for i in missing)
             ensure_budget(need, settings)
-            outputs = engine.translate([chunk[i] for i in missing])
+            # 翻译引擎内部会重试、拆批、逐条抢救，一卡就是几分钟。
+            # 这期间任务表只有「翻译 X/Y 条」不动，用户看不出在干什么，
+            # 所以先写一条「正在发第 N 批」的日志，失败时再把原因写进去。
+            try:
+                outputs = engine.translate([chunk[i] for i in missing])
+            except Exception as exc:
+                add_event(job["id"],
+                          f"翻译第 {start // batch_size + 1} 批（{start + 1}–"
+                          f"{start + len(chunk)} 条）失败：{type(exc).__name__}: {exc}",
+                          "error")
+                raise
             counter_add(f"chars:{today()}", need)
+            last_translate_error["text"] = ""
             counter_add("translate.total_chars", need)
             for i, value in zip(missing, outputs):
                 result[i] = value
@@ -316,10 +331,16 @@ def _loop(stage: str, index: int) -> None:
                            next_attempt_at=time.time() + 300)
                 add_event(job["id"], f"[{stage}] 挂起：{exc}", "warn")
             except FatalTranslationError as exc:
+                if stage == "translate":
+                    last_translate_error["text"] = str(exc)[:200]
+                    last_translate_error["ts"] = time.time()
                 update_job(job["id"], status="failed", error=str(exc)[:500],
                            message=str(exc)[:200], finished_at=now(), stage=stage)
                 add_event(job["id"], f"[{stage}] 不可重试：{exc}", "error")
             except Exception as exc:  # noqa: BLE001
+                if stage == "translate":
+                    last_translate_error["text"] = f"{type(exc).__name__}: {exc}"[:200]
+                    last_translate_error["ts"] = time.time()
                 log.exception("job %s stage %s failed", job["id"], stage)
                 fail(job["id"], f"{type(exc).__name__}: {exc}", stage,
                      job["attempts"], settings.max_attempts)
@@ -502,7 +523,10 @@ def stats() -> dict:
         "chars_total": int(counter_get("translate.total_chars")),
         "workers": {"extract": settings.extract_workers, "asr": settings.asr_workers,
                     "translate": settings.translate_workers},
-        "translate_api": limiter.snapshot(),
+        "translate_api": {**limiter.snapshot(),
+                          "last_error": last_translate_error["text"],
+                          "last_error_age": (int(time.time() - last_translate_error["ts"])
+                                             if last_translate_error["ts"] else -1)},
         "config_ready": config_ready(settings),
         "translate_provider": normalize_provider(settings.translate_provider),
         # 转写固定 CPU+int8，这里只是实际线程数，方便对照设置
