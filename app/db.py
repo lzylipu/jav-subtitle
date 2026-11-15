@@ -203,10 +203,29 @@ def advance(job_id: int, stage: str, progress: int, message: str, **extra: Any) 
     add_event(job_id, f"进入「{stage_label(stage)}」阶段：{message}", "info")
 
 
+STATUS_LABELS = {"done": "完成", "failed": "失败", "skipped": "跳过",
+                 "pending": "待处理", "running": "处理中"}
+
+
+def status_label(status: str) -> str:
+    return STATUS_LABELS.get(status, status)
+
+
 def finish(job_id: int, stage: str, status: str = "done", message: str = "", **extra: Any) -> None:
     level = "info" if status == "done" else "warn"
-    tail = message or ("完成" if status == "done" else status)
-    add_event(job_id, f"任务结束（{stage_label(stage)}，{status}）：{tail}", level)
+    tail = (message or "").strip()
+    # 日志给用户看，别中英混排：done/done 这种原样吐出来很怪
+    # stage 有时传的是 "done" 这种终态而不是阶段名（pipeline 收尾就是这么调的），
+    # 认不出是真阶段就别硬塞进文案里
+    if stage in STAGE_LABELS:
+        head = f"任务{status_label(status)}（{STAGE_LABELS[stage]}阶段）"
+    else:
+        head = f"任务{status_label(status)}"
+    # message 常常就是「完成」两个字，跟状态重复，没必要写成「任务完成：完成」
+    if not tail or tail == status_label(status):
+        add_event(job_id, head, level)
+    else:
+        add_event(job_id, f"{head}：{tail}", level)
     update_job(
         job_id,
         stage=stage,

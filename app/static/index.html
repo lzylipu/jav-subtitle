@@ -302,7 +302,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
           <option value="bing">必应翻译（免费，不用密钥）</option>
           <option value="deepl">DeepL 官方 API（要 key）</option>
         </select></label>
-        <label>每批几条字幕一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 10：太多模型会数不清条数</small></label>
+        <label>每批几条字幕一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 40；条数对不上会自动拆小重发</small></label>
         <label>每天最多翻多少字（0 = 不限）<input name="daily_char_budget" type="number" min="0" required></label>
         <label class="check"><input name="tm_enabled" type="checkbox">记住翻过的台词（重复台词不再花钱）</label>
 

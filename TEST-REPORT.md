@@ -12,11 +12,11 @@ Docker 20.10.24，`docker-compose` 1.29.2。
 ```
 $ docker run --rm -v $PWD:/src -w /src jav-subtitle:test python -m unittest discover -s tests
 ...................................................................................................
-Ran 111 tests in 132.4s
+Ran 116 tests in 132.9s
 OK
 ```
 
-容器里跑（宿主机没有 `faster_whisper`），GitHub Actions 的 `test` job 再跑一遍，均 111 项全过。
+容器里跑（宿主机没有 `faster_whisper`），GitHub Actions 的 `test` job 再跑一遍，均 116 项全过。
 
 > 测试目录不打包进镜像，跑测试要挂载源码：`-v $PWD:/src -w /src`。覆盖范围：
 
@@ -30,6 +30,7 @@ OK
 | 阶段 | 预算熔断、复用已有日文字幕、音频丢失回退、翻译写 SRT 且命中 TM |
 | **只用 CPU（5 项）** | 模型必须建在 cpu+int8、自动线程上限 min(4,核数)、核数为 0 时至少 1 线程、显式线程被尊重、settings 里不许再出现 `device`/`compute_type` 字段 |
 | **翻译渠道（30 项）** | 密钥清洗（空格/引号/`Bearer ` 前缀/`DeepL-Auth-Key `）、渠道归一化、TM 命名空间按渠道隔离、空行不发上游但保留位置、失败批自动二分但不无限拆、致命错误不重试、谷歌/必应/DeepL 请求形态、谷歌 403 自动换 key、DeepL `:fx` 选免费端点、456 额度耗尽判致命、`config_ready` 不误报免密钥渠道 |
+| **日志文案（4 项，v3.5 新增）** | 三个阶段映射成「抽音频/转写/翻译」、状态映射成「完成/失败/跳过」、`finish()` 写的事件里不许出现 `done`/`asr` 这类内部值 |
 | **翻译容错（7 项，v3.5 新增）** | 模型返回裸数组 / 字符串 id / 换外壳都能解析、条数不符抛 `ShapeError` 触发拆批、半截 JSON 不当成条数问题、译文为空算条数问题、一批里有一句毒字幕只留那一句原文其余照译、整批全废仍报错（不当成功）、连续失败即放弃抢救不再空打请求、请求体带「共 N 条」与 `max_tokens` |
 | **账号（14 项）** | 改账号要验当前口令、改完当场换票、旧 cookie 失效、`WEB_PASSWORD` 锁定时拒绝并说明原因、长度下限、用户名不能带空格、老 `admin-password.txt` 自动迁移 |
 | **登录页（13 项）** | 登录页匿名可访问、首页 303、API 401 且**无 `WWW-Authenticate`**、对口令种 Cookie、错口令 401、退出清 Cookie、篡改/过期 Cookie 拒绝、改口令后旧 Cookie 立即失效 |
@@ -53,6 +54,42 @@ OK
 | 错 token | `401` |
 | `GET /api/ai/overview` | 返回 `web_url / state / running / failed / recent_events / hint` |
 | `GET /api/logs` | 正序返回，`level/message/job_id` 齐全 |
+
+---
+
+## 二·五、v3.5 升级验证（旧库换新镜像）
+
+用正式环境同样的路径验证「已有数据的库能不能直接换镜像」：
+
+```
+1. 拉 lzylipu/nas-subtitle-pipeline:v3.0.0 起一个容器，/root/mig1 里生成 admin-password.txt + pipeline.db
+2. 扫描 /media（10 部）→ discovered 10
+3. 停掉，同一份 /root/mig1 换 lzylipu/jav-subtitle:latest
+4. 结果：
+   /api/health            {"ok":true,"version":"3.5"}
+   /login                 200（表单页，不再是浏览器弹窗）
+   匿名 /api/stats        401，且响应头无 WWW-Authenticate
+   用老口令登录           login=200（admin-password.txt 自动迁移成 account.json，0600）
+   /api/settings          媒体根目录 /media、模型 small 原样保留
+   /api/scan              discovered 10 / queued 0
+```
+
+再跑一遍完整链路（同一个容器，切到免密钥的谷歌渠道）：
+
+```
+入队 /media/剧集 前 1 部 → 抽音频 → 转写 33 条（57s）→ 翻译 → done 100
+统计：done 1 / failed 0 / chars_today 471 / asr_ratio 2.89×
+日志页 8 条，全部中文，例如「进入「翻译」阶段：转写完成 33 条（57s） — 任务 #1」
+```
+
+### 批大小实测（同一批 120 条真实字幕，走中转站）
+
+| 每批条数 | 总耗时 | 折合 | 整片估算（120 分钟片约 1500 条） |
+|---|---|---|---|
+| 40 | 313.5s | 2.61s/条 | 约 65 分钟 |
+| 20 | 694.8s | 5.79s/条 | 约 145 分钟 |
+
+结论：上游每次请求本身就要几十秒，**批越大越划算**，默认保持 40；某一批条数对不上时引擎自己拆成两小批重发。
 
 ---
 

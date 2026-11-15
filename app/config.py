@@ -50,9 +50,10 @@ class Settings:
     google_api_key: str = ""      # 留空用内置公开 key，失效会自动去谷歌前端抓新的
     deepl_api_key: str = ""       # 免费版以 :fx 结尾
     deepl_api_url: str = ""       # 留空按 key 后缀自动选 free / pro 端点
-    # 实测：每批 10 条又稳又快（约 0.9 秒/条）；40 条一批模型容易数不清条数，
-    # 一次不合格就得拆批重发，反而更慢
-    translation_batch_size: int = 10
+    # 实测（同一批 120 条真实字幕，走中转站）：40 条一批 2.6 秒/条，
+    # 20 条一批 5.8 秒/条 —— 上游每次请求本身就要几十秒，批越小越亏。
+    # 万一某一批模型数不清条数，引擎自己会拆成两小批重发，不用靠小批次兜底。
+    translation_batch_size: int = 40
     translate_timeout: int = 180
     translate_retries: int = 4
 
