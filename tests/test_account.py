@@ -189,6 +189,15 @@ class LegacyMigrationTests(unittest.TestCase):
         data = json.loads(main.ACCOUNT_FILE.read_text(encoding="utf-8"))
         self.assertEqual(data["password"], "legacy-pass-7")
 
+    def test_fresh_start_only_writes_account_json(self):
+        # 首启写的是 account.json；admin-password.txt 是老版本的文件，不该再生成。
+        # 启动横幅（docker logs）也必须指向实际存在的那个文件，否则用户去改会改空。
+        user, password = main.web_credentials()
+        self.assertTrue(main.ACCOUNT_FILE.exists())
+        self.assertFalse(main.PASSWORD_FILE.exists())
+        self.assertTrue(password)
+        self.assertEqual(main.web_password_source(), "new")
+
     def test_broken_account_file_falls_back_instead_of_crashing(self):
         main.ACCOUNT_FILE.write_text("{not json", encoding="utf-8")
         user, password = main.web_credentials()      # 不抛异常，退回自动生成

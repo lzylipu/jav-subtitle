@@ -311,8 +311,9 @@ async def lifespan(app: FastAPI):
               f"  首次启动，已自动生成 Web 登录口令（以后重启不变）\n"
               f"  用户名：{user}\n"
               f"  密  码：{password}\n"
-              f"  已写入：{PASSWORD_FILE}\n"
-              f"  想换口令：改这个文件，或设置 WEB_PASSWORD 环境变量后重启\n"
+              f"  已写入：{ACCOUNT_FILE}（权限 600）\n"
+              f"  想换口令：登录后在「设置 → 登录账号」里改；"
+              f"也可设 WEB_PASSWORD 环境变量后重启\n"
               f"{bar}\n", flush=True)
     elif source == "memory":
         print(f"\n[警告] 数据目录不可写，本次登录口令仅存在于内存：\n"

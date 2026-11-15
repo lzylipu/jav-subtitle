@@ -85,7 +85,8 @@ button.submit:disabled{opacity:.6;cursor:default}
   <div class="hint">
     首次启动时程序自动生成了口令，打印在容器日志里：<br>
     <code>docker logs 容器名 | grep -A5 首次启动</code><br>
-    也写在数据目录的 <code>admin-password.txt</code>。<br>
+    存在数据目录的 <code>account.json</code>（权限 600）。<br>
+    登录后可在「设置 → 登录账号」里改用户名和口令。<br>
     想自己定：设置环境变量 <code>WEB_PASSWORD</code> 后重启。
   </div>
 </form>

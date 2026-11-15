@@ -70,7 +70,7 @@
 - 仓库、`.env`、镜像里**没有任何 key**。`OPENAI_BASE_URL / MODEL / KEY` 默认空，
   网页填，落库（`/data/pipeline.db`），API 返回时 key 掩码为 `********`
 - **Web 登录口令不需要用户配**：`WEB_PASSWORD` 没设时，首次启动自动生成
-  （`secrets.token_urlsafe(12)`），写 `/data/admin-password.txt`（0600，原子替换），
+  （`secrets.token_urlsafe(12)`），写 `/data/account.json`（用户名+口令，0600，原子替换；老的 `admin-password.txt` 首次启动自动迁移），
   并在日志里打印一次；重启读同一文件，口令不变。数据目录不可写则退回内存口令并在日志告警。
   优先级：`WEB_PASSWORD` 环境变量 > 已有口令文件 > 自动生成
 - 首次启动随机生成 `hs_` + 43 字符 AI token，同样只存数据库

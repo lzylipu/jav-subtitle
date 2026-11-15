@@ -54,7 +54,7 @@ docker compose -f compose.image.yaml up -d
 docker compose -f compose.image.yaml logs subtitle | grep -A6 首次启动
 ```
 
-日志里会打印首次启动自动生成的登录口令（形如 `用户名：admin  密码：xxxxxxxx`），同时写进 `./data/admin-password.txt`，重启不会变。
+日志里会打印首次启动自动生成的登录口令（形如 `用户名：admin  密码：xxxxxxxx`），同时写进 `./data/account.json`（权限 600），重启不会变。
 
 打开 `http://<NAS-IP>:<端口>/` 会跳到 `/login` 登录页（网页表单，不是浏览器原生弹窗），用户名固定 `admin`，填口令即可。登录态存在 HttpOnly Cookie 里，有效期 30 天，重启容器不掉登录；左侧栏底部「退出登录」可登出。改口令会让所有旧登录态立即失效。
 
@@ -77,12 +77,12 @@ docker compose logs subtitle | grep -A6 首次启动
 
 | 自动创建 | 位置 |
 |---|---|
-| 登录口令 | `./data/admin-password.txt`（`WEB_PASSWORD` 环境变量优先） |
+| 登录账号 | `./data/account.json`（`WEB_PASSWORD` 环境变量优先） |
 | 数据库（全部设置、任务、翻译记忆） | `./data/pipeline.db` |
 | whisper 模型 | `./data/models`（首次下 460MB） |
 | 音频中间文件 | `./data/audio` |
 
-想换口令：改 `./data/admin-password.txt` 里的那一行，`docker compose restart` 即可。想彻底重来：停容器后删 `./data`。
+想换口令：登录后进「设置 → 登录账号」改，改完当场生效（旧会话立即失效）。想彻底重来：停容器后删 `./data`。
 
 首次启动会自动下载 whisper 模型（`small` 约 460MB），国内建议加环境变量 `HF_ENDPOINT=https://hf-mirror.com`。
 

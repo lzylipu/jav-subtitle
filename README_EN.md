@@ -52,7 +52,7 @@ docker compose -f compose.image.yaml up -d
 docker compose -f compose.image.yaml logs subtitle | grep -A6 "首次启动"
 ```
 
-The log prints the auto-generated login password on first boot; it is also written to `./data/admin-password.txt` and survives restarts.
+The log prints the auto-generated login password on first boot; it is also written to `./data/account.json` (mode 600) and survives restarts.
 
 | Registry | Image |
 |---|---|
@@ -73,12 +73,12 @@ docker compose logs subtitle | grep -A6 "首次启动"
 
 | Created automatically | Location |
 |---|---|
-| Login password | `./data/admin-password.txt` (`WEB_PASSWORD` env wins if set) |
+| Login account | `./data/account.json` (`WEB_PASSWORD` env wins if set) |
 | Database (settings, jobs, translation memory) | `./data/pipeline.db` |
 | Whisper models | `./data/models` (~460 MB on first run) |
 | Audio scratch files | `./data/audio` |
 
-To change the password, edit that one line in `./data/admin-password.txt` and `docker compose restart`. To start over, stop the container and delete `./data`.
+To change it, sign in and use Settings → Login account; the change takes effect immediately. To start over, stop the container and delete `./data`.
 
 First boot downloads the Whisper model (`small`, ~460 MB); inside mainland China set `HF_ENDPOINT=https://hf-mirror.com`.
 
