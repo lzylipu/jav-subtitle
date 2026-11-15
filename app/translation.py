@@ -91,6 +91,11 @@ def clean_secret(raw: str | None) -> str:
 
     从网页/聊天里复制 key 常带上首尾空白、引号、甚至整段 "Bearer sk-xxx"，
     直接塞进 Authorization 头会被上游判成无效 token（401）。
+
+    还有一类更隐蔽的：复制时把页面上表示「已复制」的对勾 ✓ 一起带进来，
+    httpx 组 header 时按 ascii 编码，会直接抛
+    ``UnicodeEncodeError: 'ascii' codec can't encode character '\\u2713'``，
+    看着像程序坏了，其实只是 key 里夹了个符号。所以非 ASCII 字符一律剔除。
     """
     if not raw:
         return ""
@@ -99,7 +104,8 @@ def clean_secret(raw: str | None) -> str:
         value = value[7:].strip()
     if value.lower().startswith("deepl-auth-key "):
         value = value[15:].strip()
-    return value
+    # 只留可打印 ASCII：0x21–0x7E
+    return "".join(ch for ch in value if "!" <= ch <= "~")
 
 
 def normalize_provider(raw: str | None) -> str:
@@ -276,6 +282,12 @@ class BaseTranslator:
                 time.sleep(min(2 ** attempt, 10))
             except FatalTranslationError:
                 raise
+            except UnicodeEncodeError as exc:
+                # 请求头里混进了非 ASCII（多半是 key/地址里带了 ✓ 之类的符号）。
+                # 原样抛出去用户只看到一句 Python 堆栈，根本不知道要改哪里。
+                raise FatalTranslationError(
+                    "接口地址或密钥里夹了非 ASCII 字符（比如复制时带上的 ✓、全角空格），"
+                    "只留字母数字和半角符号重填一次即可。原始错误：" + str(exc)) from exc
             except TranslationError as exc:
                 last_error = exc
                 time.sleep(min(2 ** attempt, 20))

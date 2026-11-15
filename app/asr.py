@@ -119,7 +119,13 @@ def transcribe_audio(
     """
     model, batched = get_model(model_name, cpu_threads)
     kwargs: dict[str, Any] = dict(language=language or None, vad_filter=True, beam_size=beam_size,
-                                  condition_on_previous_text=False)
+                                  condition_on_previous_text=False,
+                                  # ★ 必须给 VAD 设上限：默认不限制单块长度，实测会吐出一条
+                                  #   85 秒的「段」，里面只有 13 个字，且 83 秒的语音整段丢失。
+                                  #   切成 ≤20 秒的块，模型没有机会把长静音糊成一句。
+                                  vad_parameters=dict(max_speech_duration_s=20.0,
+                                                      min_silence_duration_ms=500,
+                                                      speech_pad_ms=200))
 
     use_words = bool(word_timestamps) and not (batch_size > 1)
     if use_words:
@@ -151,6 +157,8 @@ def transcribe_audio(
     if use_words and words:
         result = resegment(words, gap=split_gap,
                            max_seconds=max_cue_seconds, max_chars=max_cue_chars)
+    # 重切之后再收一遍尾巴：模型会把短句的时间拉得很长，字幕就挂在那儿没人说话
+    result = drop_repeats(trim_cues(result))
     return result, getattr(info, "language", "") or "", duration
 
 
@@ -219,6 +227,44 @@ def _split_at_punctuation(group: list[dict[str, Any]]) -> tuple[list[dict], list
         if group[idx - 1]["text"][-1:] in SENTENCE_END:
             return group[:idx], group[idx:]
     return group, []
+
+
+def trim_cues(segments: list[dict[str, Any]], max_cps: float = 2.5,
+              slack: float = 1.2, min_seconds: float = 1.5) -> list[dict[str, Any]]:
+    """把「文字很少、时间却拉得很长」的字幕条收回来。
+
+    whisper 在没人说话的地方（喘息、音乐、环境声）会硬凑出一句，
+    还把这句的起止拉成几十秒，屏幕上就是「字幕挂十几秒，可那时候根本没人说话」。
+
+    判据用「字数 ÷ 语速 + 余量」：日语正常语速 5 字/秒以上，这里按 2.5 字/秒算
+    （很慢地说话也够用），再给 1.2 秒余量、下限 1.5 秒 —— 正常的一句话不会被削，
+    只有那种「两个字占 85 秒」的假条会被砍回合理长度。
+    """
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        start = float(seg["start"])
+        end = float(seg["end"])
+        allowed = max(min_seconds, len(text) / max_cps + slack)
+        if end - start > allowed:
+            end = start + allowed
+        if end <= start:
+            continue
+        out.append({"start": start, "end": end, "text": text})
+    return out
+
+
+def drop_repeats(segments: list[dict[str, Any]], window: float = 2.0) -> list[dict[str, Any]]:
+    """去掉紧挨着、内容一模一样的条（模型在喘气声上反复吐同一句）。"""
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        if out and seg["text"] == out[-1]["text"] and seg["start"] - out[-1]["end"] <= window:
+            out[-1]["end"] = max(out[-1]["end"], seg["end"])
+            continue
+        out.append(dict(seg))
+    return out
 
 
 def seconds_to_timestamp(value: float) -> str:

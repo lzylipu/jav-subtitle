@@ -132,3 +132,37 @@ class WordTimestampWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrimCuesTest(unittest.TestCase):
+    """whisper 会把短句的时间拉得很长 —— 字幕挂着十几十秒，可那会儿没人说话"""
+
+    def test_long_span_short_text_is_clipped(self):
+        from app.asr import trim_cues
+        out = trim_cues([{"start": 100.0, "end": 300.0, "text": "うん"}])
+        self.assertEqual(len(out), 1)
+        # 2 个字 → 走 1.5 秒下限附近，不再占 200 秒
+        self.assertLessEqual(out[0]["end"] - out[0]["start"], 2.01)
+
+    def test_normal_cue_is_untouched(self):
+        from app.asr import trim_cues
+        out = trim_cues([{"start": 10.0, "end": 13.0, "text": "今日はいい天気ですね"}])
+        self.assertAlmostEqual(out[0]["end"], 13.0)
+
+    def test_medium_cue_is_clipped_to_density(self):
+        from app.asr import trim_cues
+        out = trim_cues([{"start": 0.0, "end": 85.0, "text": "されちゃったらこんな顔にね"}])
+        span = out[0]["end"] - out[0]["start"]
+        self.assertLess(span, 7.0)   # 12 字 → 4.8 + 1.2 余量
+
+    def test_adjacent_identical_cues_are_merged(self):
+        from app.asr import drop_repeats
+        out = drop_repeats([{"start": 0.0, "end": 1.0, "text": "はい"},
+                            {"start": 1.2, "end": 2.0, "text": "はい"}])
+        self.assertEqual(len(out), 1)
+
+    def test_different_cues_are_kept(self):
+        from app.asr import drop_repeats
+        out = drop_repeats([{"start": 0.0, "end": 1.0, "text": "はい"},
+                            {"start": 1.2, "end": 2.0, "text": "うん"}])
+        self.assertEqual(len(out), 2)

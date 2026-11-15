@@ -395,3 +395,23 @@ class SecretNeverLeaksTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanSecretTest(unittest.TestCase):
+    def test_checkmark_from_page_is_stripped(self):
+        """页面上「已复制 ✓」被一起复制进来 → httpx 组 header 抛 ascii 错误"""
+        from app.translation import clean_secret
+        self.assertEqual(clean_secret("sk-abc✓"), "sk-abc")
+
+    def test_fullwidth_space_is_stripped(self):
+        from app.translation import clean_secret
+        self.assertEqual(clean_secret("　sk-abc　"), "sk-abc")
+
+    def test_bearer_prefix_still_handled(self):
+        from app.translation import clean_secret
+        self.assertEqual(clean_secret("Bearer sk-abc"), "sk-abc")
+
+    def test_non_ascii_header_no_longer_raises(self):
+        from app.translation import OpenAITranslator
+        t = OpenAITranslator("https://api.openai.com/v1", "sk-x✓y", "gpt-4o-mini")
+        self.assertEqual(t.api_key, "sk-xy")
