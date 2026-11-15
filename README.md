@@ -20,7 +20,9 @@
 |---|---|
 | 🗂 **媒体库按目录浏览** | 索引后可以在网页上逐层点进去，看每个文件夹「多少部、已完成、未处理、队列中」 |
 | ▶️ **选目录开跑** | 只对选中的文件夹（含子目录）入队，不必整库一起跑；可填「只跑前 N 部」先试水 |
-| 🎚 **全部参数网页可调** | 并发、模型、beam、批大小、限流、预算都在 UI 改，存库即生效，不用重启容器 |
+| 🎚 **该调的才让人调** | 模型、翻译渠道、批大小、预算在 UI 改，存库即生效，不用重启容器；并发/限流/退避这些程序自己定，只读展示 |
+| 🔐 **网页登录 + 账号可改** | `/login` 表单登录（不是浏览器弹窗），HttpOnly Cookie 30 天；设置页第一个分组就能改用户名和口令 |
+| 📜 **日志页** | 时间 / 级别 / 内容三列，4 秒自动刷新，能直接看到「哪部片进到哪个阶段、卡在哪」 |
 | 🚦 **主动限流保护中转站** | 固定间隔发车 + 每分钟上限 + 429 全局冷却，绝不突发打爆 key |
 | 🔑 **API key 不内置** | 默认空值，网页填，存数据库；仓库/.env/镜像里都没有 |
 | 🤖 **AI 接入 token** | 首次启动自动生成，可在 UI 查看/复制/重置；给内网 Agent 用 Bearer 认证控制与监控 |
@@ -34,8 +36,8 @@
 ### 方式 A：拉现成镜像（不构建，最快）
 
 ```bash
-mkdir -p /opt/nas-subtitle && cd /opt/nas-subtitle
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+mkdir -p /opt/jav-subtitle && cd /opt/jav-subtitle
+curl -O https://raw.githubusercontent.com/lzylipu/jav-subtitle/main/compose.image.yaml
 ```
 
 打开 `compose.image.yaml`，只改这两处：
@@ -54,16 +56,18 @@ docker compose -f compose.image.yaml logs subtitle | grep -A6 首次启动
 
 日志里会打印首次启动自动生成的登录口令（形如 `用户名：admin  密码：xxxxxxxx`），同时写进 `./data/admin-password.txt`，重启不会变。
 
+打开 `http://<NAS-IP>:<端口>/` 会跳到 `/login` 登录页（网页表单，不是浏览器原生弹窗），用户名固定 `admin`，填口令即可。登录态存在 HttpOnly Cookie 里，有效期 30 天，重启容器不掉登录；左侧栏底部「退出登录」可登出。改口令会让所有旧登录态立即失效。
+
 | 仓库 | 地址 |
 |---|---|
-| Docker Hub（主） | `lzylipu/nas-subtitle-pipeline:latest` |
-| GHCR（镜像） | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+| Docker Hub（主） | `lzylipu/jav-subtitle:latest` |
+| GHCR（镜像） | `ghcr.io/lzylipu/jav-subtitle:latest` |
 
 ### 方式 B：本地构建
 
 ```bash
-git clone https://github.com/lzylipu/nas-subtitle-pipeline.git
-cd nas-subtitle-pipeline
+git clone https://github.com/lzylipu/jav-subtitle.git
+cd jav-subtitle
 # 同样只改 compose.yaml 里的端口和路径
 docker compose up -d --build
 docker compose logs subtitle | grep -A6 首次启动
@@ -98,9 +102,11 @@ docker compose logs subtitle | grep -A6 首次启动
 
 ## 📖 用法：索引 → 选目录 → 排队
 
+界面只有三个页签：**库与任务**（上面媒体库、下面任务，各自滚动）、**日志**（任务进度流水）、**设置**（改完点保存就生效）。
+
 ### 1️⃣ 索引
 
-点「媒体库」→「重新索引」。程序递归扫描 `MEDIA_DIR`，把每个视频记进索引表。
+点「库与任务」→「重新索引」。程序递归扫描 `MEDIA_DIR`，把每个视频记进索引表。
 这一步只读元数据（`stat`），不打开视频文件，几百 GB 也很快。
 
 ### 2️⃣ 浏览
@@ -150,6 +156,30 @@ docker compose logs subtitle | grep -A6 首次启动
 
 ---
 
+## 🌐 翻译渠道（四个可选）
+
+设置页「翻译渠道」里切换，**保存后下一次领取任务就按新渠道跑**，不用重启容器。
+右侧有「测试当前渠道」按钮，会真发一句日文过去，把译文或**上游返回的原话**显示出来——
+排查 key 是否有效，看这个比猜快。
+
+| 渠道 | 要不要密钥 | 说明 |
+|---|---|---|
+| **OpenAI 兼容接口** | 要 base_url + 模型 + key | 大模型翻译，质量最好，按你的站点计费。密钥只存数据库 |
+| **谷歌翻译** | 不用 | 走 `translate-pa.googleapis.com`，一次提交一组句子、原样返回一组译文，不会乱序。内置公开 key 失效会自动去谷歌前端抓新的 |
+| **必应翻译** | 不用 | 走 `edge.microsoft.com`，句子数组进、数组出，国内可直连 |
+| **DeepL 官方 API** | 要 key | 免费档每月 50 万字符，key 以 `:fx` 结尾自动走 `api-free`，否则走 `api.deepl.com`。端点也能手填 |
+
+两点实现细节，都是踩过的坑：
+
+- **密钥会自动清洗**：从网页/聊天里粘贴常带上首尾空格、引号、甚至 `Bearer ` 前缀。
+  带着这些字符发出去的 `Authorization` 头会被上游判成无效 token ——表现就是「在聊天软件里能用、到项目里 401」。
+  保存时会自动去掉这些字符。
+- **翻译记忆按渠道隔离**：换渠道不会命中别的引擎的缓存，机翻结果不会污染大模型的 TM。
+
+想完全免费跑：渠道选 `必应` 或 `谷歌`，不填任何密钥，直接入队即可。
+
+---
+
 ## 🚦 限流：怎么保证不打爆中转站
 
 这是 v3 的重点。有三个叠加的闸门：
@@ -173,12 +203,14 @@ docker compose logs subtitle | grep -A6 首次启动
 - **每日字数预算** `daily_char_budget`：当天送去翻译的字数超了，只停翻译阶段，转写照跑，第二天自动继续。0 = 不限。
 - **失败不无限重试**：单阶段最多 3 次，退避 30/60/120 秒；密钥错误、模型不存在直接判死，不浪费次数。
 - **断点续翻**：每批翻译完成立刻进 TM，重跑那批 0 成本。
+- **个别句子翻不过不拖累整部片**：整批不合格会拆成两小批重试（最多拆两层），再不行就逐条抢救；实在救不回来的几条保留日文原文，任务照样完成，日志里会写明有几条。
+- 默认「每批几条字幕一起发」= **10**。实测 10 条一批约 0.9 秒/条；40 条一批模型容易数不清条数，一次不合格就得拆批重发，反而更慢。
 
 ---
 
 ## 🔌 AI 接入（给内网 Agent 用）
 
-「AI 接入」页可以拿到一套现成的控制面：
+设置页最下面的「AI 接入（给内网其它 Agent 用）」分组里有现成控制面：
 
 - 服务首次启动随机生成 `hs_...` 形式的 token，**只存在数据库**，网页可见可复制可重置
 - 请求头用 `Authorization: Bearer <token>`，浏览器仍走 Basic 登录，两套并存
@@ -271,7 +303,7 @@ docker compose exec subtitle python tools/bench.py /media/某部片.mp4
 ## 📁 目录
 
 ```
-nas-subtitle-v3/
+jav-subtitle/
 ├── app/
 │   ├── config.py       # 参数定义（默认值全部保守）
 │   ├── db.py           # SQLite schema / 队列原子领取 / TM / 计数
@@ -281,7 +313,7 @@ nas-subtitle-v3/
 │   ├── asr.py          # ffmpeg 抽音频 + faster-whisper
 │   ├── translation.py  # OpenAI 兼容翻译 + 重试 + 批次拆分
 │   ├── subtitles.py    # SRT 解析/渲染/原子写
-│   ├── main.py         # HTTP 控制面（Basic + Bearer 双鉴权）
+│   ├── main.py         # HTTP 控制面（Cookie 会话 / Bearer / Basic 三套鉴权）
 │   └── static/index.html
 ├── tests/              # 41 项单元测试
 ├── tools/bench.py      # 实机吞吐基准

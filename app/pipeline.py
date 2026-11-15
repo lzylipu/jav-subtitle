@@ -16,11 +16,12 @@ from . import asr
 from .config import AUDIO_DIR, DATA_DIR, Settings
 from .db import (
     add_event, advance, claim, connect, counter_add, counter_get, fail, finish,
-    load_settings, now, today, tm_lookup, tm_store, update_job,
+    load_settings, now, stage_label, today, tm_lookup, tm_store, update_job,
 )
 from .ratelimit import limiter
 from .subtitles import Cue, atomic_write, parse_srt, render_srt, target_paths
-from .translation import FatalTranslationError, MissingConfigError, OpenAITranslator
+from .translation import (FatalTranslationError, MissingConfigError, build_translator,
+                          cache_namespace, normalize_provider, translator_cache_key)
 
 log = logging.getLogger(__name__)
 
@@ -60,21 +61,16 @@ class BudgetExceeded(RuntimeError):
 # --------------------------------------------------------------------- helpers
 
 
-def translator(settings: Settings) -> OpenAITranslator:
-    key = (settings.openai_base_url, settings.openai_api_key, settings.openai_model,
-           settings.translate_timeout, settings.translate_retries, settings.translate_rpm,
-           settings.translate_min_interval, settings.translate_429_backoff)
+def translator(settings: Settings):
+    """按当前渠道造引擎。渠道或任何相关参数变了就重建，否则复用连接。"""
+    provider = normalize_provider(settings.translate_provider)
+    key = translator_cache_key(provider, settings)
     if getattr(_local, "key", None) != key:
         old = getattr(_local, "tr", None)
         if old is not None:
             old.close()
         _local.key = key
-        _local.tr = OpenAITranslator(
-            settings.openai_base_url, settings.openai_api_key, settings.openai_model,
-            settings.translate_timeout, settings.translate_retries,
-            rpm=settings.translate_rpm, min_interval=settings.translate_min_interval,
-            backoff_429=settings.translate_429_backoff, stop_event=stop_event,
-        )
+        _local.tr = build_translator(provider, settings, stop_event=stop_event)
     return _local.tr
 
 
@@ -220,7 +216,8 @@ def handle_translate(job: dict, settings: Settings) -> None:
         finish(job["id"], "done", "skipped", "日文字幕为空")
         return
 
-    model = settings.openai_model
+    # 翻译记忆按渠道分命名空间：机翻结果不能污染大模型缓存
+    model = cache_namespace(settings.translate_provider, settings.openai_model)
     batch_size = max(1, settings.translation_batch_size)
     engine = translator(settings)
     started = time.time()
@@ -228,6 +225,7 @@ def handle_translate(job: dict, settings: Settings) -> None:
     cached_chars = 0
     translated: list[str] = []
     total = len(cues)
+    kept = 0  # 翻不过去、保留日文原文的条数
 
     for start in range(0, total, batch_size):
         chunk = cues[start:start + batch_size]
@@ -252,6 +250,14 @@ def handle_translate(job: dict, settings: Settings) -> None:
             counter_add("translate.total_chars", need)
             for i, value in zip(missing, outputs):
                 result[i] = value
+            # 个别句子反复翻不过时引擎会保留日文原文，这里如实记账并写一条日志，
+            # 免得用户看到混杂日文的字幕不知道怎么回事
+            missed = getattr(engine, "last_misses", None) or []
+            if missed:
+                kept += len(missed)
+                add_event(job["id"],
+                          f"有 {len(missed)} 条反复翻不过，先保留日文原文（例如：{missed[0][:24]}）",
+                          "warn")
             if settings.tm_enabled:
                 tm_store([(texts[i], result[i] or "") for i in missing], model)
 
@@ -264,7 +270,8 @@ def handle_translate(job: dict, settings: Settings) -> None:
     atomic_write(target, render_srt(final_cues), overwrite=settings.overwrite_existing)
     elapsed = time.time() - started
     counter_add("translate.wall_seconds", elapsed)
-    finish(job["id"], "done", "done", "完成",
+    message = "完成" if not kept else f"完成（{kept} 条保留日文原文）"
+    finish(job["id"], "done", "done", message,
            zh_srt=str(target), translate_seconds=elapsed, cached_chars=cached_chars)
 
 
@@ -292,6 +299,9 @@ def _loop(stage: str, index: int) -> None:
             if job is None:
                 stop_event.wait(1.5)
                 continue
+            add_event(job["id"],
+                      f"开始处理「{stage_label(stage)}」：{Path(job['video_path']).name}",
+                      "info")
             try:
                 handler(job, settings)
             except BudgetExceeded as exc:
@@ -423,6 +433,20 @@ def count_pending(scope: str | None = None) -> dict:
 # --------------------------------------------------------------------- stats
 
 
+def config_ready(settings: Settings) -> bool:
+    """当前渠道是否具备发请求的条件。
+
+    谷歌/必应免密钥，永远算就绪；deepl 要 key；openai 要地址+模型+key。
+    """
+    provider = normalize_provider(settings.translate_provider)
+    if provider in ("google", "bing"):
+        return True
+    if provider == "deepl":
+        return bool(settings.deepl_api_key)
+    return bool(settings.openai_base_url and settings.openai_model
+                and settings.openai_api_key)
+
+
 def device_summary(settings: Settings) -> dict:
     """给界面用的一行话：转写固定用 CPU，这里是实际会用的线程数。"""
     return {
@@ -479,8 +503,8 @@ def stats() -> dict:
         "workers": {"extract": settings.extract_workers, "asr": settings.asr_workers,
                     "translate": settings.translate_workers},
         "translate_api": limiter.snapshot(),
-        "config_ready": bool(settings.openai_base_url and settings.openai_model
-                             and settings.openai_api_key),
+        "config_ready": config_ready(settings),
+        "translate_provider": normalize_provider(settings.translate_provider),
         # 转写固定 CPU+int8，这里只是实际线程数，方便对照设置
         "asr_device": device_summary(settings),
     }

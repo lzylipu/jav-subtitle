@@ -42,10 +42,17 @@ class Settings:
     translate_workers: int = 1
 
     # 翻译
+    # 渠道：openai / google / bing / deepl。前两个免密钥，deepl 要 key。
+    translate_provider: str = "openai"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    translation_batch_size: int = 40
+    google_api_key: str = ""      # 留空用内置公开 key，失效会自动去谷歌前端抓新的
+    deepl_api_key: str = ""       # 免费版以 :fx 结尾
+    deepl_api_url: str = ""       # 留空按 key 后缀自动选 free / pro 端点
+    # 实测：每批 10 条又稳又快（约 0.9 秒/条）；40 条一批模型容易数不清条数，
+    # 一次不合格就得拆批重发，反而更慢
+    translation_batch_size: int = 10
     translate_timeout: int = 180
     translate_retries: int = 4
 
@@ -85,7 +92,8 @@ class Settings:
 
     def safe_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["openai_api_key"] = "********" if self.openai_api_key else ""
+        for field in ("openai_api_key", "google_api_key", "deepl_api_key"):
+            data[field] = "********" if data.get(field) else ""
         return data
 
     def to_json(self) -> str:
@@ -104,9 +112,13 @@ def settings_from_env() -> Settings:
         "ASR_WORKERS": "asr_workers",
         "EXTRACT_WORKERS": "extract_workers",
         "TRANSLATE_WORKERS": "translate_workers",
+        "TRANSLATE_PROVIDER": "translate_provider",
         "OPENAI_BASE_URL": "openai_base_url",
         "OPENAI_API_KEY": "openai_api_key",
         "OPENAI_MODEL": "openai_model",
+        "GOOGLE_API_KEY": "google_api_key",
+        "DEEPL_API_KEY": "deepl_api_key",
+        "DEEPL_API_URL": "deepl_api_url",
         "TRANSLATION_BATCH_SIZE": "translation_batch_size",
         "DAILY_CHAR_BUDGET": "daily_char_budget",
         "TRANSLATE_RPM": "translate_rpm",

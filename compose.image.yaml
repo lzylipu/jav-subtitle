@@ -7,11 +7,11 @@
 # 需要改的只有下面两处：端口、影片目录。
 #
 # 镜像由 GitHub Actions 自动构建：改代码 push 到 main 即自动测试 → 构建 → 推 Docker Hub。
-# Docker Hub: lzylipu/nas-subtitle-pipeline     GHCR: ghcr.io/lzylipu/nas-subtitle-pipeline
+# Docker Hub: lzylipu/jav-subtitle     GHCR: ghcr.io/lzylipu/jav-subtitle
 services:
   subtitle:
-    image: lzylipu/nas-subtitle-pipeline:latest
-    container_name: nas-subtitle
+    image: lzylipu/jav-subtitle:latest
+    container_name: jav-subtitle
     restart: unless-stopped
     ports:
       # ① 端口：冒号左边是 NAS 上访问用的端口，被占用就改成 8001 / 9000……

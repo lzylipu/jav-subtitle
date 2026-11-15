@@ -180,6 +180,13 @@ def update_job(job_id: int, **fields: Any) -> None:
         conn.execute(f"UPDATE jobs SET {keys} WHERE id=?", (*fields.values(), job_id))
 
 
+STAGE_LABELS = {"extract": "抽音频", "asr": "转写", "translate": "翻译"}
+
+
+def stage_label(stage: str) -> str:
+    return STAGE_LABELS.get(stage, stage)
+
+
 def advance(job_id: int, stage: str, progress: int, message: str, **extra: Any) -> None:
     """把任务推进到下一阶段并重新置为 pending。"""
     payload = {
@@ -192,9 +199,14 @@ def advance(job_id: int, stage: str, progress: int, message: str, **extra: Any) 
         **extra,
     }
     update_job(job_id, **payload)
+    # 阶段切换写一条事件：日志页靠这个显示「进度走到哪一步了」
+    add_event(job_id, f"进入「{stage_label(stage)}」阶段：{message}", "info")
 
 
 def finish(job_id: int, stage: str, status: str = "done", message: str = "", **extra: Any) -> None:
+    level = "info" if status == "done" else "warn"
+    tail = message or ("完成" if status == "done" else status)
+    add_event(job_id, f"任务结束（{stage_label(stage)}，{status}）：{tail}", level)
     update_job(
         job_id,
         stage=stage,

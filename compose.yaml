@@ -6,8 +6,8 @@
 services:
   subtitle:
     build: .
-    image: nas-subtitle-pipeline:local
-    container_name: nas-subtitle
+    image: jav-subtitle:local
+    container_name: jav-subtitle
     restart: unless-stopped
     ports:
       # ① 端口：冒号左边是 NAS 上访问用的端口，被占用就改成 8001 / 9000……

@@ -1,20 +1,25 @@
 """HTTP control plane.
 
-两套鉴权并存：
-- 浏览器：HTTP Basic（WEB_USER / WEB_PASSWORD），页面弹出的登录框
-- AI / 脚本：`Authorization: Bearer <api_token>`，token 首次启动随机生成，只存在数据库
+三套鉴权并存，各走各的路：
+- 浏览器：`/login` 表单登录，成功后种 HttpOnly Cookie（不再弹浏览器原生对话框）
+- AI / 脚本：`Authorization: Bearer <api_token>`，token 首次启动随机生成，只存数据库
+- 老脚本：HTTP Basic 仍然认，但服务端**不再主动索要**，所以浏览器不会弹窗
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
@@ -24,10 +29,26 @@ from .db import (
     add_event, connect, init_db, job_events, load_settings, save_settings,
 )
 from .ratelimit import limiter
+from .translation import (PROVIDER_LABELS, PROVIDERS, build_translator,
+                          clean_secret, normalize_provider)
 from .scanner import library_tree, scan_media
 
 scheduler = BackgroundScheduler()
 security = HTTPBasic(auto_error=False)
+
+SESSION_COOKIE = "ns_session"
+SESSION_TTL = 30 * 86400          # 登录一次管一个月，家用 NAS 没人想天天登
+STATIC_DIR = Path(__file__).parent / "static"
+# 不需要登录就能访问的路径：登录页本身、登录/退出接口
+ANON_PATHS = ("/login", "/api/login", "/api/logout")
+
+
+class NeedLogin(HTTPException):
+    """没登录（401）。注册了专门的 handler：页面跳登录页，接口回 JSON。"""
+
+    def __init__(self) -> None:
+        super().__init__(401, "未登录")
+
 
 
 def _bearer(request: Request) -> str:
@@ -37,9 +58,13 @@ def _bearer(request: Request) -> str:
     return ""
 
 
-PASSWORD_FILE = DATA_DIR / "admin-password.txt"
+PASSWORD_FILE = DATA_DIR / "admin-password.txt"          # 老版本只有一个口令，留着做迁移
+ACCOUNT_FILE = DATA_DIR / "account.json"                 # 现在用户名 + 口令一起存这儿
 _web_auth: tuple[str, str] | None = None
 _web_auth_source: str = ""
+
+MIN_PASSWORD_LEN = 8
+MIN_USERNAME_LEN = 2
 
 
 def _read_password_file(path: Path) -> str:
@@ -49,14 +74,29 @@ def _read_password_file(path: Path) -> str:
         return ""
 
 
-def _write_password_file(path: Path, password: str) -> None:
+def _read_account_file(path: Path) -> tuple[str, str] | None:
+    """读 account.json。文件坏了/字段缺了都当作没有，退回自动生成，不挡住启动。"""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    user = str(raw.get("username") or "").strip()
+    password = str(raw.get("password") or "")
+    if not user or not password:
+        return None
+    return user, password
+
+
+def _write_private_file(path: Path, text: str) -> None:
     """0600 + 原子替换，和字幕写入同一套写法。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(password + "\n")
+            handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
@@ -68,8 +108,14 @@ def _write_password_file(path: Path, password: str) -> None:
         raise
 
 
+def _write_account_file(path: Path, user: str, password: str) -> None:
+    payload = json.dumps({"username": user, "password": password},
+                         ensure_ascii=False, indent=2)
+    _write_private_file(path, payload + "\n")
+
+
 def web_credentials() -> tuple[str, str]:
-    """登录口令。WEB_PASSWORD 没配就自动生成一次、落盘复用，重启不变。
+    """登录账号口令。环境变量 > account.json > 老口令文件（迁移）> 自动生成。
 
     设计上「第一次运行自动创建，其余全进 Web UI 配」：
     缺口令不能当成致命错误拒绝启动，否则用户只想跑起来看看都做不到。
@@ -78,26 +124,66 @@ def web_credentials() -> tuple[str, str]:
     if _web_auth is not None:
         return _web_auth
 
-    user = (os.getenv("WEB_USER") or "admin").strip() or "admin"
+    env_user = (os.getenv("WEB_USER") or "").strip()
     env_password = (os.getenv("WEB_PASSWORD") or "").strip()
     if env_password:
-        _web_auth, _web_auth_source = (user, env_password), "env"
+        _web_auth = (env_user or "admin", env_password)
+        _web_auth_source = "env"
         return _web_auth
 
-    existing = _read_password_file(PASSWORD_FILE)
-    if existing:
-        _web_auth, _web_auth_source = (user, existing), "file"
+    stored = _read_account_file(ACCOUNT_FILE)
+    if stored:
+        _web_auth, _web_auth_source = stored, "file"
         return _web_auth
 
+    # 老版本只有 admin-password.txt：读出来迁到 account.json，用户不用重新设
+    legacy = _read_password_file(PASSWORD_FILE)
+    if legacy:
+        user = env_user or "admin"
+        try:
+            _write_account_file(ACCOUNT_FILE, user, legacy)
+        except OSError:
+            pass
+        _web_auth, _web_auth_source = (user, legacy), "legacy"
+        return _web_auth
+
+    user = env_user or "admin"
     password = secrets.token_urlsafe(12)
     try:
-        _write_password_file(PASSWORD_FILE, password)
+        _write_account_file(ACCOUNT_FILE, user, password)
         source = "new"
     except OSError:
         # 数据目录不可写也别挡住启动，至少本次运行能登进去。
         source = "memory"
     _web_auth, _web_auth_source = (user, password), source
     return _web_auth
+
+
+def account_locked_reason() -> str:
+    """什么时候 Web UI 里改不了账号口令：只有环境变量强指定时。"""
+    if (os.getenv("WEB_PASSWORD") or "").strip():
+        return "口令由环境变量 WEB_PASSWORD 指定，网页里改不动。要改请删掉该变量后重启容器。"
+    return ""
+
+
+def update_credentials(username: str, password: str) -> None:
+    """改账号口令。写完立刻生效：旧 cookie 因为签名密钥变了会全部失效。"""
+    global _web_auth, _web_auth_source
+    locked = account_locked_reason()
+    if locked:
+        raise ValueError(locked)
+    user = (username or "").strip()
+    if len(user) < MIN_USERNAME_LEN:
+        raise ValueError(f"用户名至少 {MIN_USERNAME_LEN} 个字符")
+    if any(c.isspace() for c in user):
+        raise ValueError("用户名里不能有空格")
+    if len(password or "") < MIN_PASSWORD_LEN:
+        raise ValueError(f"口令至少 {MIN_PASSWORD_LEN} 个字符")
+    try:
+        _write_account_file(ACCOUNT_FILE, user, password)
+    except OSError as exc:
+        raise ValueError(f"写不进数据目录（{ACCOUNT_FILE}）：{exc}") from exc
+    _web_auth, _web_auth_source = (user, password), "file"
 
 
 def web_password_source() -> str:
@@ -110,9 +196,52 @@ def reset_web_credentials() -> None:
     _web_auth, _web_auth_source = None, ""
 
 
+# ------------------------------------------------------------------ session
+# 不用服务端会话表：cookie 里带「过期时间 + HMAC 签名」，签名密钥由当前口令派生。
+# 好处是重启容器不掉登录，改口令则所有旧 cookie 立即失效。
+
+
+def _session_secret() -> bytes:
+    _, password = web_credentials()
+    return ("ns-session:" + password).encode("utf-8")
+
+
+def make_session() -> str:
+    expires = int(time.time()) + SESSION_TTL
+    sig = hmac.new(_session_secret(), str(expires).encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{expires}.{sig}"
+
+
+def verify_session(value: str) -> bool:
+    if not value or "." not in value:
+        return False
+    expires_text, sig = value.split(".", 1)
+    try:
+        expires = int(expires_text)
+    except ValueError:
+        return False
+    if expires < time.time():
+        return False
+    want = hmac.new(_session_secret(), expires_text.encode("ascii"), hashlib.sha256).hexdigest()
+    return secrets.compare_digest(sig, want)
+
+
+def check_password(username: str, password: str) -> bool:
+    user, expected = web_credentials()
+    if not expected:
+        return False
+    ok_user = secrets.compare_digest((username or "").strip(), user)
+    ok_pass = secrets.compare_digest(password or "", expected)
+    return ok_user and ok_pass
+
+
 def authorized(request: Request,
                credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
-    """Basic 或 Bearer 任一通过即可。只读 token 不能改状态。"""
+    """Cookie 会话、Bearer token、Basic 任一通过即可。只读 token 不能改状态。"""
+    url = getattr(request, "url", None)
+    if getattr(url, "path", "") in ANON_PATHS:
+        return
+
     settings = load_settings()
     token = _bearer(request)
     if token and settings.api_token and secrets.compare_digest(token, settings.api_token):
@@ -120,13 +249,19 @@ def authorized(request: Request,
             raise HTTPException(403, "该 API token 是只读的，不允许执行写操作")
         return
 
+    if verify_session(request.cookies.get(SESSION_COOKIE, "")):
+        return
+
     user, password = web_credentials()
     if not password:
         return
-    if (credentials is None
-            or not secrets.compare_digest(credentials.password, password)
-            or not secrets.compare_digest(credentials.username, user)):
-        raise HTTPException(401, "未授权", headers={"WWW-Authenticate": "Basic"})
+    # Basic 只在调用方主动带了 Basic 头时才校验，绝不主动发 WWW-Authenticate
+    if credentials is not None \
+            and secrets.compare_digest(credentials.password, password) \
+            and secrets.compare_digest(credentials.username, user):
+        return
+
+    raise NeedLogin()
 
 
 def reschedule() -> None:
@@ -161,7 +296,7 @@ def ensure_api_token() -> str:
         return settings.api_token
     settings.api_token = "hs_" + secrets.token_urlsafe(32)
     save_settings(settings)
-    add_event(0, "已生成 AI 接入 token", "info")
+    add_event(0, "已生成 AI 接入令牌（给内网 Agent 用）", "info")
     return settings.api_token
 
 
@@ -198,8 +333,89 @@ async def lifespan(app: FastAPI):
     pipeline.stop_pools()
 
 
-app = FastAPI(title="NAS 日中字幕流水线", lifespan=lifespan,
+app = FastAPI(title="JAV-Subtitle", lifespan=lifespan,
               dependencies=[Depends(authorized)])
+
+
+@app.exception_handler(NeedLogin)
+async def _need_login(request: Request, exc: NeedLogin):
+    """页面上没人登录 → 跳登录页；接口上没人登录 → 回 401 JSON（不带 Basic 挑战）。"""
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "未登录", "login": "/login"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
+
+
+class AccountBody(BaseModel):
+    username: str = ""
+    password: str = ""
+    current_password: str = ""
+
+
+@app.get("/api/account")
+def get_account():
+    """当前登录账号。口令永远不回传，只说从哪来、能不能改。"""
+    user, _ = web_credentials()
+    return {
+        "username": user,
+        "source": web_password_source(),
+        "locked_reason": account_locked_reason(),
+        "editable": not account_locked_reason(),
+        "min_password_len": MIN_PASSWORD_LEN,
+    }
+
+
+@app.post("/api/account")
+def set_account(body: AccountBody, request: Request):
+    """改登录账号与口令。要验当前口令，成功后重种 Cookie，不会把自己踢出去。"""
+    user, password = web_credentials()
+    if not secrets.compare_digest((body.current_password or ""), password):
+        time.sleep(0.4)
+        raise HTTPException(400, "当前口令不对")
+    target_user = (body.username or "").strip() or user
+    target_pass = body.password or ""
+    if not target_pass:
+        target_pass = password       # 只改用户名时口令保持不动
+    try:
+        update_credentials(target_user, target_pass)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    response = JSONResponse({"ok": True, "username": target_user,
+                             "relogin": False})
+    # 会话签名由口令派生，改完旧签名就失效了；这里当场换一张新票
+    response.set_cookie(SESSION_COOKIE, make_session(), max_age=SESSION_TTL,
+                        httponly=True, samesite="lax", path="/")
+    return response
+
+
+class LoginBody(BaseModel):
+    username: str = ""
+    password: str = ""
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse(STATIC_DIR / "login.html", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/login")
+def do_login(body: LoginBody):
+    if not check_password(body.username, body.password):
+        time.sleep(0.4)          # 拖一下，别让人拿脚本硬刷口令
+        raise HTTPException(401, "用户名或口令不对")
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        SESSION_COOKIE, make_session(),
+        max_age=SESSION_TTL, httponly=True, samesite="lax", path="/",
+    )
+    return response
+
+
+@app.post("/api/logout")
+def do_logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
 
 
 class SettingsPatch(BaseModel):
@@ -214,9 +430,13 @@ class SettingsPatch(BaseModel):
     translate_rpm: int | None = None
     translate_min_interval: float | None = None
     translate_429_backoff: int | None = None
+    translate_provider: str | None = None
     openai_base_url: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
+    google_api_key: str | None = None
+    deepl_api_key: str | None = None
+    deepl_api_url: str | None = None
     translation_batch_size: int | None = None
     translate_retries: int | None = None
     daily_char_budget: int | None = None
@@ -271,9 +491,16 @@ def set_settings(patch: SettingsPatch):
     current = load_settings()
     data = current.safe_dict()
     changes = patch.model_dump(exclude_none=True)
+    secret_fields = ("openai_api_key", "google_api_key", "deepl_api_key")
     for key, value in changes.items():
-        if key == "openai_api_key" and value == "********":
-            continue
+        if key in secret_fields:
+            if value == "********":
+                continue
+            # 从聊天/网页粘进来的 key 常带引号、空格、甚至 "Bearer " 前缀，
+            # 原样塞进请求头会被上游判成无效 token，这里统一收拾干净。
+            value = clean_secret(value)
+        if key == "translate_provider":
+            value = normalize_provider(value)
         data[key] = value
     updated = Settings.from_dict(data)
     save_settings(updated)
@@ -421,6 +648,48 @@ def queue_status():
             "translate_api": limiter.snapshot()}
 
 
+@app.get("/api/translate/providers")
+def translate_providers():
+    """给设置页下拉用：有哪几个渠道、各自的说明。"""
+    settings = load_settings()
+    return {
+        "current": normalize_provider(settings.translate_provider),
+        "items": [{"id": p, "label": PROVIDER_LABELS[p],
+                   "needs_key": p in ("openai", "deepl")} for p in PROVIDERS],
+    }
+
+
+class TranslateTestBody(BaseModel):
+    provider: str | None = None
+    text: str | None = None
+
+
+@app.post("/api/translate/test")
+def translate_test(body: TranslateTestBody | None = None):
+    """拿当前（或指定）渠道真发一句，把上游原话回给界面。
+
+    这就是排查「key 在别处能用、到这儿 401」最直接的办法：
+    看到的错误是上游返回的原文，不是我加工过的猜测。
+    """
+    body = body or TranslateTestBody()
+    settings = load_settings()
+    provider = normalize_provider(body.provider or settings.translate_provider)
+    text = (body.text or "こんにちは、今日はいい天気ですね。").strip() or "こんにちは"
+    started = time.time()
+    engine = build_translator(provider, settings)
+    try:
+        outputs = engine.translate_texts([text])
+        return {"ok": True, "provider": provider,
+                "source": text, "target": outputs[0] if outputs else "",
+                "seconds": round(time.time() - started, 2)}
+    except Exception as exc:  # noqa: BLE001 - 要把上游原话原样带回界面
+        return {"ok": False, "provider": provider, "source": text,
+                "error": f"{type(exc).__name__}: {exc}",
+                "seconds": round(time.time() - started, 2)}
+    finally:
+        engine.close()
+
+
 @app.post("/api/queue/reset-limiter")
 def reset_limiter():
     limiter.reset()
@@ -450,6 +719,8 @@ AI_HELP = {
         {"method": "GET", "path": "/api/logs?limit=100&since_id=0", "desc": "全局日志"},
         {"method": "GET", "path": "/api/settings", "desc": "读取全部设置（密钥已掩码）"},
         {"method": "PUT", "path": "/api/settings", "desc": "修改设置"},
+        {"method": "GET", "path": "/api/translate/providers", "desc": "可选翻译渠道列表"},
+        {"method": "POST", "path": "/api/translate/test", "body": {"text": "..."}, "desc": "用当前渠道真发一句，返回译文或上游原始报错"},
     ],
 }
 
@@ -514,7 +785,7 @@ def rotate_token(body: TokenBody | None = None):
     if body is not None and body.readonly is not None:
         settings.api_token_readonly = body.readonly
     save_settings(settings)
-    add_event(0, "AI 接入 token 已重置", "warn")
+    add_event(0, "AI 接入令牌已重置，旧的立即失效", "warn")
     return {"token": settings.api_token, "readonly": settings.api_token_readonly}
 
 
@@ -534,4 +805,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.0"}
+    return {"ok": True, "version": "3.5"}

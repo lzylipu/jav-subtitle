@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · JAV-Subtitle</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='11' fill='%234299e1'/%3E%3Crect x='7' y='12' width='22' height='3.4' rx='1.7' fill='white'/%3E%3Crect x='7' y='19' width='15' height='3.4' rx='1.7' fill='white' opacity='.8'/%3E%3C/svg%3E">
+<style>
+:root{color-scheme:light;--ink:#1d1d1f;--muted:rgba(60,60,67,.65);--line:rgba(255,255,255,.55);--accent:#4299e1;--glass:rgba(255,255,255,.46);--fill:rgba(255,255,255,.34);--field:rgba(255,255,255,.62);--stage:#edf2f7;--glow:linear-gradient(140deg,#a0aec0 0%,#cbd5e0 45%,#edf2f7 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.28)}
+:root[data-theme="dark"]{color-scheme:dark;--ink:#f5f5f7;--muted:rgba(235,235,245,.62);--line:rgba(255,255,255,.12);--glass:rgba(18,22,28,.55);--fill:rgba(255,255,255,.06);--field:rgba(0,0,0,.28);--stage:#0b1220;--glow:linear-gradient(140deg,#1a365d 0%,#2a4365 45%,#1a202c 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.6)}
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;
+  color:var(--ink);background:var(--stage);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans SC",sans-serif;
+}
+.stage{position:fixed;inset:0;z-index:-1;background:var(--glow)}
+.card{
+  width:100%;max-width:360px;background:var(--glass);border:1px solid var(--line);border-radius:22px;
+  padding:26px 24px 20px;backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow);position:relative;
+}
+.brand{display:flex;gap:10px;align-items:center;margin:0 0 4px}
+.mark{width:36px;height:36px;border-radius:12px;display:block;flex:none}
+.brand>div{flex:1;min-width:0}
+h1{font-size:17px;margin:0;letter-spacing:.2px}
+.sub{color:var(--muted);font-size:12px;margin:8px 0 20px}
+.theme{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;padding:0;display:grid;place-items:center;border:1px solid var(--line);background:var(--fill);color:var(--ink);cursor:pointer}
+.theme svg{width:16px;height:16px;fill:currentColor}
+.theme .sun{display:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+:root[data-theme="dark"] .theme .moon{display:none}
+:root[data-theme="dark"] .theme .sun{display:block}
+.theme .sun circle{fill:currentColor;stroke:none}
+label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);margin-bottom:14px}
+input{
+  display:block;width:100%;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:12px;
+  padding:10px 11px;background:var(--field);color:var(--ink);
+}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(66,153,225,.16)}
+button.submit{
+  width:100%;font:inherit;font-size:14px;font-weight:650;border:1px solid var(--accent);border-radius:12px;
+  background:var(--accent);color:#fff;padding:11px;cursor:pointer;margin-top:2px;
+}
+button.submit:hover{filter:brightness(1.06)}
+button.submit:disabled{opacity:.6;cursor:default}
+#msg{min-height:18px;font-size:12.5px;color:#d70015;margin:10px 0 0;text-align:center}
+:root[data-theme="dark"] #msg{color:#ff6961}
+.hint{
+  margin-top:16px;padding-top:14px;border-top:1px solid var(--line);
+  font-size:11.5px;line-height:1.7;color:var(--muted);
+}
+.hint code{background:var(--field);border:1px solid var(--line);border-radius:6px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="stage"></div>
+<form class="card" id="f" autocomplete="on">
+  <button class="theme" type="button" id="themeBtn" title="明暗" aria-label="明暗">
+    <svg class="moon" viewBox="0 0 24 24"><path d="M15 3a9 9 0 1 0 6 15 7 7 0 0 1-6-15z"/></svg>
+    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+  </button>
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
+      <defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4299e1"/><stop offset="1" stop-color="#3182ce"/>
+      </linearGradient></defs>
+      <rect width="36" height="36" rx="11" fill="url(#mg)"/>
+      <rect x="7" y="12" width="22" height="3.4" rx="1.7" fill="#fff" opacity=".95"/>
+      <rect x="7" y="19" width="15" height="3.4" rx="1.7" fill="#fff" opacity=".8"/>
+      <rect x="7" y="26" width="9" height="2.6" rx="1.3" fill="#fff" opacity=".55"/>
+    </svg>
+    <div><h1>JAV-Subtitle</h1></div>
+  </div>
+  <p class="sub">日文影片批量生成中文字幕</p>
+
+  <label>用户名
+    <input name="username" id="u" required autocomplete="username" value="admin" autofocus>
+  </label>
+  <label>口令
+    <input name="password" id="p" type="password" required autocomplete="current-password">
+  </label>
+
+  <button class="submit" id="go" type="submit">登 录</button>
+  <p id="msg"></p>
+
+  <div class="hint">
+    首次启动时程序自动生成了口令，打印在容器日志里：<br>
+    <code>docker logs 容器名 | grep -A5 首次启动</code><br>
+    也写在数据目录的 <code>admin-password.txt</code>。<br>
+    想自己定：设置环境变量 <code>WEB_PASSWORD</code> 后重启。
+  </div>
+</form>
+
+<script>
+const $ = id => document.getElementById(id);
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('jav-theme', t); } catch (e) {}
+}
+(function initTheme() {
+  let t = 'light';
+  try { t = localStorage.getItem('jav-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+  applyTheme(t);
+})();
+$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+
+$('f').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const msg = $('msg'), btn = $('go');
+  msg.textContent = '';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: $('u').value.trim(), password: $('p').value})
+    });
+    if (r.ok) { location.replace('/'); return; }
+    const data = await r.json().catch(() => ({}));
+    msg.textContent = data.detail || '登录失败';
+    $('p').value = '';
+    $('p').focus();
+  } catch (e) {
+    msg.textContent = '连不上服务：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 """v3 新增能力测试：目录索引、按目录入队、限流闸门、AI token 鉴权。"""
+import json
 import os
 import shutil
 import stat
@@ -258,13 +259,16 @@ class AutoPasswordTests(unittest.TestCase):
         env.reset()
         main.reset_web_credentials()
         self.tmp = Path(tempfile.mkdtemp())
-        self.pwfile = self.tmp / "admin-password.txt"
+        self.pwfile = self.tmp / "account.json"
         self._orig_file = main.PASSWORD_FILE
-        main.PASSWORD_FILE = self.pwfile
+        self._orig_account = main.ACCOUNT_FILE
+        main.ACCOUNT_FILE = self.pwfile
+        main.PASSWORD_FILE = self.tmp / "legacy-password.txt"   # 确保迁移分支不参与
         self._orig_env = os.environ.pop("WEB_PASSWORD", None)
 
     def tearDown(self):
         self.main.PASSWORD_FILE = self._orig_file
+        self.main.ACCOUNT_FILE = self._orig_account
         if self._orig_env is not None:
             os.environ["WEB_PASSWORD"] = self._orig_env
         else:
@@ -277,7 +281,9 @@ class AutoPasswordTests(unittest.TestCase):
         self.assertEqual(user, "admin")
         self.assertGreaterEqual(len(password), 12)
         self.assertEqual(self.main.web_password_source(), "new")
-        self.assertEqual(self.pwfile.read_text(encoding="utf-8").strip(), password)
+        stored = json.loads(self.pwfile.read_text(encoding="utf-8"))
+        self.assertEqual(stored["password"], password)
+        self.assertEqual(stored["username"], "admin")
 
     def test_reuses_password_file_across_restart(self):
         _, first = self.main.web_credentials()
@@ -287,7 +293,8 @@ class AutoPasswordTests(unittest.TestCase):
         self.assertEqual(self.main.web_password_source(), "file")
 
     def test_env_password_wins_over_file(self):
-        self.pwfile.write_text("fromfile\n", encoding="utf-8")
+        self.pwfile.write_text(json.dumps({"username": "admin", "password": "fromfile"}),
+                               encoding="utf-8")
         os.environ["WEB_PASSWORD"] = "fromenv"
         try:
             self.assertEqual(self.main.web_credentials()[1], "fromenv")
@@ -301,7 +308,7 @@ class AutoPasswordTests(unittest.TestCase):
         self.assertEqual(mode, 0o600)
 
     def test_unwritable_location_falls_back_to_memory(self):
-        self.main.PASSWORD_FILE = Path("/proc/definitely-not-here/pw.txt")
+        self.main.ACCOUNT_FILE = Path("/proc/definitely-not-here/account.json")
         _, password = self.main.web_credentials()
         self.assertTrue(password)
         self.assertEqual(self.main.web_password_source(), "memory")
@@ -309,8 +316,10 @@ class AutoPasswordTests(unittest.TestCase):
     def test_generated_password_actually_authenticates(self):
         from fastapi import HTTPException
         from fastapi.security import HTTPBasicCredentials
+        from starlette.requests import Request
         _, password = self.main.web_credentials()
-        request = SimpleNamespace(method="GET", headers={})
+        request = Request({"type": "http", "method": "GET", "headers": [],
+                           "path": "/api/stats", "query_string": b""})
         self.main.authorized(request, HTTPBasicCredentials(username="admin", password=password))
         with self.assertRaises(HTTPException):
             self.main.authorized(

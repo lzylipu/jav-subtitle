@@ -34,8 +34,8 @@ You edit **two lines** — the port and your video folder. Everything else (logi
 ### Option A: pull the prebuilt image (no build needed)
 
 ```bash
-mkdir -p /opt/nas-subtitle && cd /opt/nas-subtitle
-curl -O https://raw.githubusercontent.com/lzylipu/nas-subtitle-pipeline/main/compose.image.yaml
+mkdir -p /opt/jav-subtitle && cd /opt/jav-subtitle
+curl -O https://raw.githubusercontent.com/lzylipu/jav-subtitle/main/compose.image.yaml
 ```
 
 Open `compose.image.yaml` and change just these two places:
@@ -56,14 +56,14 @@ The log prints the auto-generated login password on first boot; it is also writt
 
 | Registry | Image |
 |---|---|
-| Docker Hub (primary) | `lzylipu/nas-subtitle-pipeline:latest` |
-| GHCR (mirror) | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+| Docker Hub (primary) | `lzylipu/jav-subtitle:latest` |
+| GHCR (mirror) | `ghcr.io/lzylipu/jav-subtitle:latest` |
 
 ### Option B: build locally
 
 ```bash
-git clone https://github.com/lzylipu/nas-subtitle-pipeline.git
-cd nas-subtitle-pipeline
+git clone https://github.com/lzylipu/jav-subtitle.git
+cd jav-subtitle
 # still only the port and the path in compose.yaml
 docker compose up -d --build
 docker compose logs subtitle | grep -A6 "首次启动"

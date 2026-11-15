@@ -22,11 +22,11 @@
 | `app/pipeline.py` | 核心：三阶段 worker 池、TM 查写、预算闸门、二分拆分 |
 | `app/ratelimit.py` | 全局限流器（固定间隔发车 + 429 冷却） |
 | `app/scanner.py` | 递归索引 + 目录树递归计数 |
-| `app/translation.py` | OpenAI 兼容翻译、可重试/不可重试错误分类 |
+| `app/translation.py` | 四个翻译渠道（openai / google / bing / deepl）、密钥清洗、按渠道隔离的 TM 命名空间、错误分类与二分拆分 |
 | `app/asr.py` | ffmpeg 抽音频 + faster-whisper |
 | `app/db.py` | SQLite schema、`BEGIN IMMEDIATE` 原子领取、TM、计数器 |
-| `app/main.py` | HTTP 控制面，Basic + Bearer 双鉴权 |
-| `app/static/index.html` | 单文件前端，四个页签 |
+| `app/main.py` | HTTP 控制面，Cookie 会话 / Bearer / Basic 三套鉴权 + `/login` 登录页 |
+| `app/static/index.html` | 单文件前端：玻璃拟态侧栏 + **三个页签（库与任务 / 日志 / 设置）**；顶部状态是**一条整体横栏**；操作反馈走右下角 toast（不会被 4 秒刷新冲掉）；刷新页面会停在上次那页、那个目录、那组筛选；设置页第一个分组是「登录账号」，性能并发改只读卡片，AI 接入并入设置页；按翻译渠道切换字段，带「测试当前渠道」按钮 |
 | `tests/` | 35 项单元测试 |
 | `tools/bench.py` | 实机吞吐基准 |
 
@@ -74,7 +74,8 @@
   并在日志里打印一次；重启读同一文件，口令不变。数据目录不可写则退回内存口令并在日志告警。
   优先级：`WEB_PASSWORD` 环境变量 > 已有口令文件 > 自动生成
 - 首次启动随机生成 `hs_` + 43 字符 AI token，同样只存数据库
-- 两套鉴权并存：浏览器 Basic（`WEB_USER`/`WEB_PASSWORD`），AI 用
+- 三套鉴权并存：浏览器用 `/login` 表单页换 HttpOnly Cookie（30 天，签名由当前口令派生，改口令即失效），
+  服务端**绝不主动发 `WWW-Authenticate`** 因此不会再弹浏览器原生对话框；老脚本的 Basic 仍然认；AI 用
   `Authorization: Bearer <api_token>`
 - token 可设「只读」：GET 放行，写操作 403
 - **部署面只剩端口和路径**：`compose.yaml` / `compose.image.yaml` 里没有 `environment:`
@@ -145,9 +146,9 @@ AMD ROCm，**没有 Intel GPU 后端**；`get_supported_compute_types("rocm"/"hi
 
 | 项 | 值 |
 |---|---|
-| 仓库 | https://github.com/lzylipu/nas-subtitle-pipeline |
-| Docker Hub（主） | `lzylipu/nas-subtitle-pipeline:latest` |
-| GHCR（镜像） | `ghcr.io/lzylipu/nas-subtitle-pipeline:latest` |
+| 仓库 | https://github.com/lzylipu/jav-subtitle |
+| Docker Hub（主） | `lzylipu/jav-subtitle:latest` |
+| GHCR（镜像） | `ghcr.io/lzylipu/jav-subtitle:latest` |
 | 平台 | `linux/amd64`，9 层，348.7 MB |
 | 现有 tag | `latest` / `v3.0.0` / `sha-1368f55` — 三者同 digest `sha256:3e190970…` |
 

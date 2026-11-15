@@ -3,95 +3,233 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NAS 字幕流水线</title>
+<title>JAV-Subtitle</title>
 <style>
-:root{font-family:system-ui,"Noto Sans SC","Microsoft YaHei",sans-serif;color:#1d2a31;background:#f4f6f5;--ok:#16817a;--warn:#b4741c;--bad:#b4453a;--mut:#61736f}
-*{box-sizing:border-box}body{margin:0}
-header{background:#13293a;color:#fff;padding:14px 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
-h1{font-size:17px;margin:0;font-weight:600}
-.tags{display:flex;flex-wrap:wrap;gap:6px}
-.tag{background:rgba(255,255,255,.12);border-radius:12px;padding:3px 10px;font-size:12px;white-space:nowrap}
-.tag b{color:#8fe0d4;font-weight:600}
-main{max-width:1280px;margin:0 auto;padding:16px 22px 60px}
-nav{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-button{font:inherit;font-size:13px;border-radius:6px;border:1px solid #166c68;background:#166c68;color:#fff;padding:7px 12px;cursor:pointer}
-button.ghost{background:#fff;color:#174c4a}
-button.on{background:#166c68;color:#fff;border-color:#166c68}
-button.mini{padding:4px 8px;font-size:12px}
+:root{color-scheme:light;--ink:#1d1d1f;--muted:rgba(60,60,67,.65);--line:rgba(255,255,255,.55);--accent:#4299e1;--accent-ink:#fff;--ok:#34c759;--bad:#ff3b30;--warn:#ff9f0a;--glass:rgba(255,255,255,.46);--fill:rgba(255,255,255,.34);--field:rgba(255,255,255,.62);--stage:#edf2f7;--glow:linear-gradient(140deg,#a0aec0 0%,#cbd5e0 45%,#edf2f7 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.28)}
+:root[data-theme="dark"]{color-scheme:dark;--ink:#f5f5f7;--muted:rgba(235,235,245,.74);--line:rgba(255,255,255,.2);--glass:rgba(22,27,36,.68);--fill:rgba(255,255,255,.06);--field:rgba(0,0,0,.28);--stage:#0b1220;--glow:linear-gradient(140deg,#1a365d 0%,#2a4365 45%,#1a202c 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.6)}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans SC",sans-serif;background:var(--stage);min-height:100vh}
+.stage{position:fixed;inset:0;z-index:-1;background:var(--glow)}
+.shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+aside{margin:12px;padding:16px 12px;border-radius:22px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:6px}
+.brand{display:flex;gap:10px;align-items:center;margin:0 0 16px}
+.brandbox{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+.brandbox>div{flex:1;min-width:0}
+.mark{width:36px;height:36px;border-radius:12px;display:block;flex:none}
+.brand h1{font-size:16px;margin:0;letter-spacing:.2px}
+.brand p{margin:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.theme{width:36px;height:36px;border-radius:50%;padding:0;display:grid;place-items:center;flex:none}
+.theme svg{width:18px;height:18px;fill:currentColor}
+.theme .sun{display:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+:root[data-theme="dark"] .theme .moon{display:none}
+:root[data-theme="dark"] .theme .sun{display:block}
+.theme .sun circle{fill:currentColor;stroke:none}
+.foot button{width:100%;background:var(--fill);border:1px solid var(--line);color:var(--ink);font-size:13px;border-radius:12px;padding:9px 10px;display:flex;align-items:center;justify-content:center;gap:8px}
+.foot button:hover{background:var(--field);color:var(--bad)}
+nav{display:flex;flex-direction:column;gap:2px}
+nav button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;color:var(--ink);border:0;border-radius:10px;padding:9px 10px;margin:0;cursor:pointer;font:inherit}
+nav button svg{width:18px;height:18px;flex:none;fill:currentColor;opacity:.72}
+nav button.on{background:var(--accent);color:#fff}
+nav button.on svg{opacity:1}
+nav hr{border:0;border-top:1px solid var(--line);margin:6px 8px}
+aside .foot{margin-top:auto;padding-top:10px}
+main{padding:12px 16px 16px 12px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.pane{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:var(--glass);border:1px solid var(--line);border-radius:22px;padding:18px;backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow)}
+.pane[hidden]{display:none}
+#libView,#jobsView{flex:1 1 auto;min-height:0;overflow:hidden}
+.stack{flex:1 1 auto;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.stack .pane{flex:1 1 auto;min-height:0}
+#setView .pane, #logView{min-height:0}
+.perf{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.perf div{background:var(--fill);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.perf b{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-bottom:2px}
+.perf span{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.lvl{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.lvl.info{background:rgba(66,153,225,.16);color:#2b6cb0}
+.lvl.warn{background:rgba(255,159,10,.18);color:#b06f00}
+.lvl.error{background:rgba(255,59,48,.16);color:#c0392b}
+:root[data-theme="dark"] .lvl.info{color:#90cdf4}
+:root[data-theme="dark"] .lvl.warn{color:#ffb340}
+:root[data-theme="dark"] .lvl.error{color:#ff8b84}
+#logRows td{vertical-align:top;font-size:12.5px}
+#logRows td.t{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+#logRows tr.new td{animation:flash 1.2s ease-out}
+@keyframes flash{from{background:rgba(66,153,225,.16)}to{background:transparent}}
+#setView{display:block;overflow-y:auto;overflow-x:hidden}
+#setView>*:last-child{margin-bottom:2px}
+#stackView[hidden],#setView[hidden],#logView[hidden]{display:none}
+h2{margin:0 0 6px;font-size:18px}
+.hint{color:var(--muted);font-size:12px;line-height:1.5}
+.stats{display:flex;flex-wrap:wrap;margin:0;background:var(--glass);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--shadow);overflow:hidden}
+.stat{flex:1 1 0;min-width:0;padding:10px 12px;border-left:1px solid var(--line)}
+.stat:first-child{border-left:0}
+.stat b{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat span{display:block;font-size:16px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.soft span{color:var(--muted);font-weight:550}
+.stat.alert span{color:var(--bad)}
+.stat.warm span{color:var(--warn)}
+button{border:1px solid var(--line);border-radius:12px;padding:9px 12px;background:var(--fill);color:var(--ink);font:inherit;cursor:pointer}
+button:hover{background:var(--field)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.ghost{background:var(--fill);color:var(--ink)}
+button.mini{padding:6px 9px;font-size:13px}
 button:disabled{opacity:.45;cursor:default}
-.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-input,select{font:inherit;font-size:13px;border:1px solid #b9c8c4;border-radius:5px;padding:7px 8px;background:#fff;min-width:0}
-#notice{min-height:20px;font-size:13px;color:#a4402a;margin:0 0 8px}
-table{width:100%;border-collapse:collapse;background:#fff;font-size:13px;table-layout:fixed}
-th,td{padding:8px 10px;border-bottom:1px solid #e5eae8;text-align:left;vertical-align:top}
-th{background:#e9f0ee;color:#334a47;font-weight:600;font-size:12px}
-td.path{overflow-wrap:anywhere;word-break:break-all;color:#33474f}
-td.msg{overflow-wrap:anywhere;color:#4a5d5a}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
+.bar .inline{flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px;white-space:nowrap}
+.bar .inline input{width:74px;text-align:center;padding:8px 6px}
+.pgroup{display:contents}
+.pgroup[hidden]{display:none}
+.bar select{width:auto;min-width:132px;flex:0 0 auto}
+.bar input{width:auto}
+.bar input#search{flex:1 1 200px;min-width:160px}
+input,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:9px 10px;font:inherit;background:var(--field);color:var(--ink);min-width:0}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(66,153,225,.16)}
+input[type=checkbox]{width:16px;height:16px;flex:none;accent-color:var(--accent)}
+#notice{min-height:0;font-size:13px;color:#c93400;margin:0}
+#notice:empty{display:none}
+:root[data-theme="dark"] #notice{color:#ffb340}
+:root[data-theme="dark"] .stats{border-color:rgba(255,255,255,.22)}
+:root[data-theme="dark"] .stat{border-left-color:rgba(255,255,255,.26)}
+:root[data-theme="dark"] .stat b{color:rgba(235,235,245,.8)}
+/* 暗色下输入框和占位符要提亮一档，否则跟卡片底糊在一起看不清 */
+:root[data-theme="dark"] input, :root[data-theme="dark"] select{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.24);color:#fff}
+:root[data-theme="dark"] input::placeholder{color:rgba(235,235,245,.45)}
+:root[data-theme="dark"] legend{color:#fff}
+:root[data-theme="dark"] label{color:rgba(235,235,245,.72)}
+#notice:not(:empty){background:rgba(255,159,10,.14);border:1px solid rgba(255,159,10,.34);border-radius:12px;padding:9px 12px;margin:0}
+#toasts{position:fixed;right:20px;bottom:20px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(400px,calc(100vw - 40px));pointer-events:none}
+.toast{pointer-events:auto;display:flex;gap:9px;align-items:flex-start;background:var(--glass);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:14px;padding:11px 14px;font-size:13px;line-height:1.45;backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--shadow);animation:toastin .18s ease-out;color:var(--ink)}
+.toast.err{border-left-color:var(--bad)}
+.toast.info{border-left-color:var(--accent)}
+.toast .ic{flex:none;font-weight:700}
+.toast.ok .ic{color:var(--ok)}
+.toast.err .ic{color:var(--bad)}
+.toast.info .ic{color:var(--accent)}
+@keyframes toastin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (max-width:640px){#toasts{left:16px;right:16px;bottom:16px;max-width:none}}
+.tablewrap{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--fill)}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed}
+th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+td.empty{padding:28px 12px;text-align:center;color:var(--muted)}
+th{background:var(--field);color:var(--muted);font-weight:600;font-size:12px;position:sticky;top:0;z-index:1;backdrop-filter:blur(12px) saturate(160%)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--field)}
+td.path{overflow-wrap:anywhere;word-break:break-all}
+td.msg{overflow-wrap:anywhere;color:var(--muted)}
 .ellip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;white-space:nowrap}
-.b-run{background:#e3f0ff;color:#1d5fa8}.b-done{background:#e2f4ef;color:#0e6b5f}
-.b-skip{background:#eef0ef;color:#61736f}.b-fail{background:#fbe9e7;color:#a4302a}
-.b-pend{background:#f3f0e2;color:#8a6d16}
-.b-new{background:#eef2fb;color:#2c4a8a}
-.prog{height:6px;background:#e6edeb;border-radius:4px;overflow:hidden;margin-top:4px}
-.prog i{display:block;height:100%;background:var(--ok)}
-.pager{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--mut)}
-form{display:grid;grid-template-columns:1fr;gap:14px;max-width:960px}
-fieldset{border:1px solid #dbe4e1;border-radius:8px;padding:12px 16px 16px;background:#fff;
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
-legend{font-size:13px;font-weight:600;color:#2c5b57;padding:0 6px}
-label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#3d5450;min-width:0}
-label.check{flex-direction:row;align-items:center;gap:7px}
-input[type=checkbox]{width:15px;height:15px;flex:none}
-.hint{font-size:11px;color:var(--mut);line-height:1.5;grid-column:1/-1}
-form > button{justify-self:start}
-dialog{border:1px solid #cfdad6;border-radius:8px;max-width:min(760px,92vw);width:100%}
-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:55vh;overflow:auto}
-.crumb{font-size:13px;color:#33474f;margin-bottom:8px;overflow-wrap:anywhere}
-.crumb a{color:#166c68;cursor:pointer;text-decoration:underline}
-tr.dir:hover td{background:#f6faf9}
-.num{font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:3px 9px;border-radius:10px;font-size:11.5px;white-space:nowrap}
+.b-run{background:rgba(66,153,225,.18);color:#2b6cb0}.b-done{background:rgba(52,199,89,.18);color:#1d7a35}
+.b-skip{background:rgba(142,142,147,.18);color:#5f6368}.b-fail{background:rgba(255,59,48,.16);color:#d70015}
+.b-pend{background:rgba(255,159,10,.18);color:#b45309}.b-new{background:rgba(90,103,216,.16);color:#3b45a5}
+:root[data-theme="dark"] .b-run{color:#63b3ed}:root[data-theme="dark"] .b-done{color:#4ade80}
+:root[data-theme="dark"] .b-skip{color:#a1a1a6}:root[data-theme="dark"] .b-fail{color:#ff6961}
+:root[data-theme="dark"] .b-pend{color:#fbbf24}:root[data-theme="dark"] .b-new{color:#a5b4fc}
+.prog{height:6px;background:var(--field);border-radius:4px;overflow:hidden;margin-top:6px}
+.prog i{display:block;height:100%;background:var(--accent)}
+.pager{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:var(--muted);flex:none}
+form{display:grid;grid-template-columns:1fr;gap:12px;max-width:1000px}
+fieldset{border:1px solid var(--line);border-radius:18px;padding:14px 16px 16px;background:var(--fill);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;margin:0}
+legend{font-size:13px;font-weight:650;color:var(--ink);padding:0 6px}
+label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}
+label.check{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:13px}
+.hint{grid-column:1/-1}
+form>button{justify-self:start}
+dialog{border:1px solid var(--line);border-radius:22px;padding:18px;max-width:min(760px,92vw);width:100%;background:var(--glass);color:var(--ink);backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow)}
+dialog::backdrop{background:rgba(15,23,42,.38)}
+dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:55vh;overflow:auto;background:var(--field);border-radius:12px;padding:12px}
+.crumb{font-size:13px;color:var(--muted);margin-bottom:10px;overflow-wrap:anywhere}
+.crumb a{color:var(--accent);cursor:pointer;text-decoration:none}
+.num,.mono{font-variant-numeric:tabular-nums}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .tokenbox{display:flex;gap:8px;grid-column:1/-1;align-items:center}
 .tokenbox input{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-pre.help{background:#fff;border:1px solid #dbe4e1;border-radius:8px;padding:12px;font-size:12px;
-  overflow:auto;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere}
-@media(max-width:760px){fieldset{grid-template-columns:1fr}main{padding:12px}th:nth-child(2),td:nth-child(2){display:none}}
+pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px;padding:12px;font-size:12px;overflow:auto;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+@media(min-width:761px){
+  html,body{height:100%;overflow:hidden}
+  .shell{height:100vh}
+  aside{position:sticky;top:12px;align-self:start;height:calc(100vh - 24px);overflow-y:auto}
+  main{height:100vh;overflow-y:auto}
+}
+@media(max-width:760px){
+  .shell{grid-template-columns:1fr}
+  aside{position:static;height:auto;margin:8px 8px 0;padding:10px}
+  .brand{margin-bottom:10px}
+  nav{flex-direction:row;overflow-x:auto;gap:4px;padding-bottom:2px}
+  nav button{width:auto;white-space:nowrap;padding:7px 10px}
+  nav hr{display:none}
+  aside .foot{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+  main{padding:8px}
+  .pane{min-height:0;padding:14px;border-radius:18px}
+  fieldset{grid-template-columns:1fr}
+  .perf{grid-template-columns:repeat(2,minmax(0,1fr))}
+  th:nth-child(2),td:nth-child(2){display:none}
+  .stats{gap:6px}
+  .stat{min-width:0;flex:1 1 92px;padding:6px 10px}
+  .stat span{font-size:15px}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>NAS 字幕流水线</h1>
-  <div class="tags" id="tags"></div>
-</header>
-<main>
+<div class="stage"></div>
+<div class="shell">
+<aside>
+  <div class="brand">
+    <div class="brandbox">
+      <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
+        <defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4299e1"/><stop offset="1" stop-color="#3182ce"/>
+        </linearGradient></defs>
+        <rect width="36" height="36" rx="11" fill="url(#mg)"/>
+        <rect x="7" y="12" width="22" height="3.4" rx="1.7" fill="#fff" opacity=".95"/>
+        <rect x="7" y="19" width="15" height="3.4" rx="1.7" fill="#fff" opacity=".8"/>
+        <rect x="7" y="26" width="9" height="2.6" rx="1.3" fill="#fff" opacity=".55"/>
+      </svg>
+      <div><h1>JAV-Subtitle</h1><p>日文字幕流水线</p></div>
+    </div>
+    <button class="theme" id="themeBtn" onclick="toggleTheme()" title="明暗" aria-label="明暗">
+      <svg class="moon" viewBox="0 0 24 24"><path d="M15 3a9 9 0 1 0 6 15 7 7 0 0 1-6-15z"/></svg>
+      <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+    </button>
+  </div>
   <nav>
-    <button class="ghost" id="tabLib">媒体库</button>
-    <button class="ghost" id="tabJobs">任务</button>
-    <button class="ghost" id="tabSet">设置</button>
-    <button class="ghost" id="tabAi">AI 接入</button>
+    <button class="on" id="tabStack"><svg viewBox="0 0 24 24"><path d="M3 5h7l2 2h9v12H3z"/><path d="M3 13h18v6H3z" opacity=".45"/></svg><span>库与任务</span></button>
+    <button id="tabLog"><svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zM4 10.5h16v3H4zM4 17h11v3H4z"/></svg><span>日志</span></button>
+    <hr>
+    <button id="tabSet"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M3 12l2-2-2-2 3-3 2 2 2-1V3h6v3l2 1 2-2 3 3-2 2 2 2-3 3-2-2-2 1v3H8v-3l-2-1-2 2z" opacity=".45"/></svg><span>设置</span></button>
   </nav>
+  <div class="foot">
+    <button onclick="logout()"><svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:currentColor;opacity:.7"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5zM16 7l-1.4 1.4L17.2 11H9v2h8.2l-2.6 2.6L16 17l5-5z"/></svg><span>退出登录</span></button>
+  </div>
+</aside>
+<main>
+  <div class="stats" id="tags"></div>
   <p id="notice" role="status"></p>
+  <div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
-  <section id="libView">
+  <section id="stackView" class="stack">
+  <div id="libView" class="pane">
+    <h2>媒体库</h2>
+    <p class="hint">扫描只建索引，不会自动排队。勾选目录、填「前 N 部」，再点加入队列。</p>
     <div class="bar">
-      <button id="reindex">重新索引</button>
+      <button class="ghost" id="reindex">重新索引</button>
       <button class="ghost" id="libUp">上一级</button>
-      <input id="limitN" type="number" min="0" value="0" style="width:110px" title="只处理前 N 部，0 为不限">
-      <button id="enqueueSel">加入队列</button>
-      <span class="hint" id="libInfo"></span>
+      <label class="inline">前 <input id="limitN" type="number" min="0" placeholder="0" title="只处理前 N 部，0 或留空为不限"> 部（0 不限）</label>
+      <button class="primary" id="enqueueSel">加入队列</button>
+      <span class="hint" id="libInfo" style="flex-basis:100%"></span>
     </div>
     <div class="crumb" id="crumb"></div>
-    <table>
+    <div class="tablewrap"><table>
       <colgroup><col style="width:44px"><col><col style="width:90px"><col style="width:90px"><col style="width:90px"><col style="width:90px"></colgroup>
       <thead><tr><th><input type="checkbox" id="checkAll" title="全选"></th><th>目录</th><th>视频</th><th>已完成</th><th>未处理</th><th>队列中</th></tr></thead>
       <tbody id="libRows"></tbody>
-    </table>
-  </section>
+    </table></div>
+  </div>
 
-  <section id="jobsView" hidden>
+  <div id="jobsView" class="pane">
+    <h2>任务</h2>
+    <p class="hint">三阶段独立排队：抽音频 → 转写 → 翻译。单条片子内部严格顺序，不会出半截字幕。</p>
     <div class="bar">
-      <button id="scan">扫描媒体</button>
+      <button class="primary" id="scan">扫描媒体</button>
       <button class="ghost" id="toggle">暂停队列</button>
       <button class="ghost" id="retryAll">重试全部失败</button>
       <select id="statusFilter">
@@ -110,109 +248,182 @@ pre.help{background:#fff;border:1px solid #dbe4e1;border-radius:8px;padding:12px
       </select>
       <input id="search" placeholder="按路径搜索" style="flex:1;min-width:140px">
     </div>
-    <table>
+    <div class="tablewrap"><table>
       <colgroup><col style="width:38%"><col style="width:10%"><col style="width:14%"><col style="width:28%"><col style="width:10%"></colgroup>
       <thead><tr><th>视频</th><th>状态</th><th>阶段 / 进度</th><th>消息</th><th>操作</th></tr></thead>
       <tbody id="rows"></tbody>
-    </table>
+    </table></div>
     <div class="pager">
       <button class="ghost mini" id="prev">上一页</button>
       <span id="pageInfo"></span>
       <button class="ghost mini" id="next">下一页</button>
     </div>
+  </div>
   </section>
 
-  <section id="setView" hidden>
+  <section id="setView" class="pane" hidden>
+    <h2>设置</h2>
+    <p class="hint">改完点保存即生效，下一次领取任务就按新参数跑。带「只读」的分组是程序自己定的，不用管。</p>
+
+    <form id="accountForm">
+      <fieldset><legend>登录账号</legend>
+        <label>用户名<input name="username" autocomplete="username" required maxlength="32"></label>
+        <label>当前口令（改之前验一下）<input name="current_password" type="password" autocomplete="current-password" required></label>
+        <label>新口令（留空 = 不换）<input name="password" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
+        <label>再输一次新口令<input name="password2" type="password" autocomplete="new-password" placeholder="和上一栏一致"></label>
+        <div class="hint" id="acctHint" style="grid-column:1/-1">正在读取…</div>
+      </fieldset>
+      <button class="primary" type="submit">保存账号口令</button>
+    </form>
+
     <form id="settings">
-      <fieldset><legend>目录与语言</legend>
+      <fieldset><legend>媒体与语言</legend>
         <label>媒体根目录（容器内路径）<input name="media_root" required></label>
         <label>源语言<input name="source_language" required></label>
         <label>目标语言<input name="target_language" required></label>
-        <label>文件稳定等待（秒）<input name="min_file_age" type="number" min="0" required></label>
+        <div class="hint" style="grid-column:1/-1">改根目录只影响扫描范围，不会动硬盘上的文件。</div>
       </fieldset>
 
-      <fieldset><legend>转写（faster-whisper，纯 CPU）</legend>
-        <div class="hint" id="devLine">正在读取…</div>
-        <label>模型<input name="whisper_model" required></label>
-        <label>每实例线程数（0 = 自动）<input name="cpu_threads" type="number" min="0" max="64" required></label>
-        <label>beam size（1 最快，5 更准）<input name="beam_size" type="number" min="1" max="10" required></label>
-        <label>批推理大小（1 关闭批处理）<input name="asr_batch_size" type="number" min="1" max="32" required></label>
-        <label class="check"><input name="keep_japanese_srt" type="checkbox">保存日文字幕到影片目录</label>
-        <label class="check"><input name="keep_audio" type="checkbox">保留提取的音频（占空间）</label>
+      <fieldset><legend>转写（纯 CPU，不用显卡）</legend>
+        <label>模型大小<select name="whisper_model" id="wm">
+          <option value="small">small —— 默认，速度和准确率平衡</option>
+          <option value="medium">medium —— 更准，慢约 2 倍</option>
+          <option value="large-v3">large-v3 —— 最准，慢约 4 倍，建议 4GB 以上内存</option>
+        </select></label>
+        <label class="check"><input name="keep_japanese_srt" type="checkbox">把日文字幕另存一份到影片旁边（方便校对）</label>
+        <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有的中文字幕（默认不覆盖）</label>
+        <div class="hint" id="devLine" style="grid-column:1/-1">正在读取…</div>
       </fieldset>
 
-      <fieldset><legend>并行度（各阶段独立排队）</legend>
-        <label>抽音频并发<input name="extract_workers" type="number" min="1" max="16" required></label>
-        <label>转写并发<input name="asr_workers" type="number" min="1" max="8" required></label>
-        <label>翻译并发<input name="translate_workers" type="number" min="1" max="16" required></label>
-        <div class="hint">转写吃 CPU，4 核机器建议 1；翻译走网络，可在限流允许范围内调高。</div>
+      <fieldset><legend>翻译渠道</legend>
+        <label>用哪个渠道<select name="translate_provider" id="provider">
+          <option value="openai">OpenAI 兼容接口（大模型，译文最像人话）</option>
+          <option value="google">谷歌翻译（免费，不用密钥）</option>
+          <option value="bing">必应翻译（免费，不用密钥）</option>
+          <option value="deepl">DeepL 官方 API（要 key）</option>
+        </select></label>
+        <label>每批几条字幕一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 10：太多模型会数不清条数</small></label>
+        <label>每天最多翻多少字（0 = 不限）<input name="daily_char_budget" type="number" min="0" required></label>
+        <label class="check"><input name="tm_enabled" type="checkbox">记住翻过的台词（重复台词不再花钱）</label>
+
+        <div class="pgroup" data-provider="openai">
+          <label>接口地址<input name="openai_base_url" placeholder="https://xxx/v1"></label>
+          <label>模型名<input name="openai_model" placeholder="gpt-4o-mini"></label>
+          <label>API 密钥（留空 / 显示 ******** 表示保持原样）<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="直接粘贴，带不带 Bearer 前缀都行"></label>
+          <div class="hint">译文最自然；额度、限流、费用都由你填的那个站决定。</div>
+        </div>
+
+        <div class="pgroup" data-provider="google">
+          <label>谷歌 API key（留空用内置的，失效会自动续）<input name="google_api_key" type="password" autocomplete="new-password"></label>
+          <div class="hint">免费渠道，一个密钥都不用也能跑。一次提交一组句子、原样返回一组译文，不会串行错位。</div>
+        </div>
+
+        <div class="pgroup" data-provider="bing">
+          <div class="hint">免费渠道，不需要任何密钥，国内网络能直连。机翻质量中等，胜在零成本。</div>
+        </div>
+
+        <div class="pgroup" data-provider="deepl">
+          <label>DeepL API key（免费版的以 :fx 结尾）<input name="deepl_api_key" type="password" autocomplete="new-password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"></label>
+          <label>接口地址（留空自动判断免费版/付费版）<input name="deepl_api_url" placeholder="https://api-free.deepl.com/v2/translate"></label>
+          <div class="hint">免费档每月 50 万字符，注册地址 deepl.com/pro-api。key 带 :fx 自动走免费端点。</div>
+        </div>
+
+        <div class="bar" style="margin:10px 0 0;grid-column:1/-1">
+          <button type="button" class="ghost" id="testTr">测试当前渠道</button>
+          <span class="hint" id="testTrOut" style="flex:1 1 320px">点一下会真发一句日文过去，把译文或上游的原话显示出来。</span>
+        </div>
       </fieldset>
 
-      <fieldset><legend>翻译接口（OpenAI 兼容）</legend>
-        <label>接口地址<input name="openai_base_url" required></label>
-        <label>模型<input name="openai_model" required></label>
-        <label>API 密钥（留空/******** 表示不变）<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="在此粘贴你自己的 key，不要写进 .env"></label>
-        <label>每批条数<input name="translation_batch_size" type="number" min="1" max="200" required></label>
-        <label>失败重试次数<input name="translate_retries" type="number" min="1" max="10" required></label>
-        <label>每日翻译字数预算（0 不限）<input name="daily_char_budget" type="number" min="0" required></label>
-        <label class="check"><input name="tm_enabled" type="checkbox">启用翻译记忆（重复台词不再收费）</label>
+      <fieldset><legend>运行节奏（只读，程序自己定）</legend>
+        <div class="perf" id="perfGrid">正在读取…</div>
+        <div class="hint" style="grid-column:1/-1">这些值是为了保证不打爆中转站、也不把 CPU 吃满而定的，不用你调。</div>
       </fieldset>
 
-      <fieldset><legend>限流（保护中转站，别把 key 打爆）</legend>
-        <label>每分钟最多请求数（0 不限）<input name="translate_rpm" type="number" min="0" max="600" required></label>
-        <label>两次请求最小间隔（秒）<input name="translate_min_interval" type="number" min="0" max="600" step="0.5" required></label>
-        <label>收到 429 后冷却（秒）<input name="translate_429_backoff" type="number" min="10" max="3600" required></label>
-        <div class="hint">实际间隔取「60/rpm」和「最小间隔」里更大的那个，绝不会突发。收到 429 时所有 worker 一起停手，冷却时间连续 429 会翻倍。</div>
-      </fieldset>
-
-      <fieldset><legend>扫描与容错</legend>
-        <label>每日扫描小时<input name="schedule_hour" type="number" min="0" max="23" required></label>
-        <label>每日扫描分钟<input name="schedule_minute" type="number" min="0" max="59" required></label>
-        <label>单阶段最大重试<input name="max_attempts" type="number" min="1" max="10" required></label>
-        <label class="check"><input name="schedule_enabled" type="checkbox">启用每日扫描</label>
-        <label class="check"><input name="auto_enqueue" type="checkbox">扫描后自动把全部视频入队（默认关，开启前想清楚额度）</label>
-        <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有中文字幕</label>
-      </fieldset>
-
-      <button type="submit">保存设置</button>
+      <button class="primary" type="submit">保存设置</button>
     </form>
-  </section>
 
-  <section id="aiView" hidden>
     <form id="aiform">
-      <fieldset><legend>AI 接入（供内网其它 Agent 调试 / 监控）</legend>
-        <label style="grid-column:1/-1">对外访问地址（填容器外能访问的地址，例如 http://10.10.0.5:8000）<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
-        <label class="check" style="grid-column:1/-1"><input name="api_token_readonly" type="checkbox">该 token 只读（只允许查询，不允许暂停/重试/入队）</label>
-        <label style="grid-column:1/-1">AI 接入 token（给内网 Agent 用）
+      <fieldset><legend>AI 接入（给内网其它 Agent 用）</legend>
+        <label style="grid-column:1/-1">对外访问地址（填容器外能访问到的地址）<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
+        <label class="check" style="grid-column:1/-1"><input name="api_token_readonly" type="checkbox">这个 token 只读（只能查，不能暂停/重试/入队）</label>
+        <label style="grid-column:1/-1">接入 token
           <div class="tokenbox">
             <input id="tokenValue" readonly>
             <button type="button" class="ghost mini" id="copyToken">复制</button>
             <button type="button" class="ghost mini" id="rotateToken">重新生成</button>
           </div>
         </label>
-        <div class="hint">token 只在服务端数据库里，不进代码仓库、不进 .env。请求头用 <span class="mono">Authorization: Bearer &lt;token&gt;</span>，浏览器仍走 Basic 登录。把地址和 token 一起给 AI，它就能读状态、看日志、暂停队列、重试任务。</div>
+        <div class="hint" style="grid-column:1/-1">token 只存在服务端数据库里，不进代码仓库、不进 .env。请求头写 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 就能读状态、看日志、暂停队列、重试任务。</div>
       </fieldset>
-      <button type="submit">保存接入设置</button>
+      <button class="primary" type="submit">保存接入设置</button>
     </form>
+
     <h3 style="font-size:14px;margin:18px 0 8px">接口清单</h3>
     <pre class="help" id="aiHelp">加载中…</pre>
+  </section>
+
+  <section id="logView" class="pane" hidden>
+    <h2>日志</h2>
+    <p class="hint">任务进度、阶段切换、失败原因都记在这里，最新的在最下面。停在这个页面时每 4 秒自动刷新。</p>
+    <div class="bar">
+      <select id="logLevel">
+        <option value="">全部级别</option>
+        <option value="info">一般</option>
+        <option value="warn">警告</option>
+        <option value="error">错误</option>
+      </select>
+      <label class="inline"><input type="checkbox" id="logFollow" checked> 自动滚到最新</label>
+      <button class="ghost" id="logRefresh">刷新</button>
+      <span class="hint" id="logInfo" style="flex-basis:100%"></span>
+    </div>
+    <div class="tablewrap"><table>
+      <colgroup><col style="width:170px"><col style="width:76px"><col></colgroup>
+      <thead><tr><th>时间</th><th>级别</th><th>内容</th></tr></thead>
+      <tbody id="logRows"></tbody>
+    </table></div>
   </section>
 
   <dialog id="dlg"><h3 style="margin-top:0">任务记录</h3><pre id="log"></pre><button class="ghost" id="close">关闭</button></dialog>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const state = {page:1, size:50, total:0, libPath:'', libRoot:''};
+const state = {page:1, size:50, total:0, libPath:'', libRoot:'', view:'stack'};
 const notice = t => $('notice').textContent = t || '';
+// 操作反馈走 toast：不会被 4 秒一次的 refreshStats 冲掉，成功失败一眼能看清
+function toast(msg, kind = 'ok', ms) {
+  const box = $('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  const ic = kind === 'ok' ? '✓' : kind === 'err' ? '!' : 'i';
+  el.innerHTML = `<span class="ic">${ic}</span><span>${esc(msg)}</span>`;
+  box.appendChild(el);
+  const life = ms || (kind === 'err' ? 7000 : 3200);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; setTimeout(() => el.remove(), 260); }, life);
+}
+// 按钮：执行期间禁用并改文案，结束后恢复，人能看到「点到了」
+async function withBusy(btn, label, fn) {
+  const old = btn.textContent, was = btn.disabled;
+  btn.disabled = true; btn.textContent = label;
+  try { return await fn(); }
+  finally { btn.disabled = was; btn.textContent = old; }
+}
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 async function api(path, method = 'GET', body) {
   const opt = {method, headers:{}};
   if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   const r = await fetch(path, opt);
+  if (r.status === 401) { location.replace('/login'); throw new Error('未登录'); }
   const text = await r.text();
   if (!r.ok) throw new Error(text.slice(0, 300) || ('HTTP ' + r.status));
   return text ? JSON.parse(text) : {};
+}
+
+async function logout() {
+  try { await fetch('/api/logout', {method:'POST'}); } catch (e) {}
+  // 退出就把上次停留的位置和页面口令一起忘掉，换个人登录不该看到上一个人的目录
+  try { localStorage.removeItem(UI_KEY); } catch (e) {}
+  location.replace('/login');
 }
 
 function fmtDuration(sec) {
@@ -233,16 +444,28 @@ async function refreshStats() {
     const eta = s.eta_seconds ? fmtDuration(s.eta_seconds) : '待估';
     const ratio = s.asr_ratio ? (s.asr_ratio.toFixed(2) + '×实时') : '待测';
     const lm = s.translate_api || {};
-    const tags = [
-      ['索引视频', s.indexed_videos], ['队列总数', s.total], ['待处理', s.pending], ['处理中', s.running],
-      ['完成', s.done], ['失败', s.failed], ['转写速度', ratio], ['剩余估算', eta],
-      ['今日字数', s.chars_today], ['近1分钟请求', lm.sent_last_minute ?? 0]
+    const stats = [
+      ['索引视频', s.indexed_videos, ''], ['队列总数', s.total, ''], ['待处理', s.pending, ''],
+      ['处理中', s.running, s.running ? 'warm' : ''], ['完成', s.done, ''],
+      ['失败', s.failed, s.failed ? 'alert' : ''],
+      ['转写速度', ratio, s.asr_ratio ? '' : 'soft'],
+      ['剩余估算', eta, s.eta_seconds ? '' : 'soft'],
+      ['今日字数', s.chars_today, ''],
+      ['近1分钟请求', lm.sent_last_minute ?? 0, '']
     ];
-    if (lm.cooldown_remaining > 0) tags.push(['限流冷却', lm.cooldown_remaining + ' 秒']);
-    $('tags').innerHTML = tags.map(([k, v]) => `<span class="tag">${k} <b>${esc(v)}</b></span>`).join('');
+    if (lm.cooldown_remaining > 0) stats.push(['限流冷却', lm.cooldown_remaining + ' 秒', 'warm']);
+    $('tags').innerHTML = stats.map(([k, v, cls]) =>
+      `<div class="stat ${cls}"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
     $('toggle').textContent = s.paused ? '恢复队列' : '暂停队列';
     $('toggle').dataset.paused = s.paused ? '1' : '0';
-    if (s.blocked) notice(s.blocked); else if (!s.config_ready) notice('翻译接口还没配好：到「设置」填接口地址、模型和 API 密钥。');
+    if (s.blocked) notice(s.blocked);
+    else if (!s.config_ready) {
+      const p = s.translate_provider || 'openai';
+      const hint = p === 'deepl'
+        ? 'DeepL 还没填 API key：到「设置」→「翻译渠道」把 key 填上。'
+        : '翻译接口还没配好：到「设置」→「翻译渠道」填接口地址、模型和 API 密钥。';
+      notice(hint);
+    }
     else if (!$('notice').dataset.keep) notice('');
     return s;
   } catch (e) { notice('统计失败：' + e.message); }
@@ -256,6 +479,8 @@ async function refreshJobs() {
   if (q) params.set('q', q);
   try {
     const data = await api('/api/jobs?' + params);
+    // 恢复的页码可能已经超出（任务变少了），自动退回第一页，别给人看空表
+    if (!data.items.length && state.page > 1) { state.page = 1; return refreshJobs(); }
     state.total = data.total;
     $('rows').innerHTML = data.items.map(j => {
       const name = j.video_path.split('/').pop();
@@ -271,12 +496,13 @@ async function refreshJobs() {
           <button class="ghost mini" onclick="showLog(${j.id})">记录</button>
           ${j.status === 'failed' ? `<button class="mini" onclick="retry(${j.id})">重试</button>` : ''}
         </td></tr>`;
-    }).join('') || '<tr><td colspan="5" style="text-align:center;color:#61736f;padding:24px">暂无任务，先到「媒体库」选目录加入队列</td></tr>';
+    }).join('') || '<tr><td class="empty" colspan="5">暂无任务，先到「媒体库」选目录加入队列</td></tr>';
     const pages = Math.max(1, Math.ceil(data.total / state.size));
     $('pageInfo').textContent = `第 ${state.page} / ${pages} 页 · 共 ${data.total} 条`;
     $('prev').disabled = state.page <= 1;
     $('next').disabled = state.page >= pages;
-  } catch (e) { notice('列表失败：' + e.message); }
+    saveUi();
+  } catch (e) { toast('任务列表读取失败：' + e.message, 'err'); }
 }
 
 async function loadLibrary(path) {
@@ -292,9 +518,16 @@ async function loadLibrary(path) {
         <td class="num">${c.done}</td>
         <td class="num"><span class="badge b-new">${c.new}</span></td>
         <td class="num">${c.pending + c.running}</td>
-      </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:#61736f;padding:24px">这个目录下没有已索引的视频。先点「重新索引」。</td></tr>`;
+      </tr>`).join('') || `<tr><td class="empty" colspan="6">这个目录下没有已索引的视频。先点「重新索引」。</td></tr>`;
     $('checkAll').checked = false;
-  } catch (e) { notice('目录读取失败：' + e.message); }
+    $('enqueueSel').disabled = true;
+    $('libUp').disabled = (lib.path === lib.root);
+    saveUi();
+  } catch (e) {
+    toast('目录读取失败：' + e.message, 'err');
+    // 上次记的目录可能已经被删了，退回根目录，别把页面卡在错误态
+    if (path) loadLibrary('');
+  }
 }
 
 function crumbHtml(lib) {
@@ -319,7 +552,10 @@ async function showLog(id) {
     $('dlg').showModal();
   } catch (e) { notice(e.message); }
 }
-async function retry(id) { try { await api(`/api/jobs/${id}/retry`, 'POST'); refresh(); } catch (e) { notice(e.message); } }
+async function retry(id) {
+  try { await api(`/api/jobs/${id}/retry`, 'POST'); toast(`任务 ${id} 已重新排队`); refresh(); }
+  catch (e) { toast('重试失败：' + e.message, 'err'); }
+}
 
 async function loadSettings() {
   const data = await api('/api/settings');
@@ -328,7 +564,26 @@ async function loadSettings() {
     if (!el) continue;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   }
+  syncProviderGroups();
   loadDevice();
+  loadPerf();
+}
+
+// 只读的性能/并发展示：这些参数不给用户改，只让用户知道现在是什么档位
+async function loadPerf() {
+  const box = $('perfGrid');
+  try {
+    const [d, s] = await Promise.all([api('/api/device'), api('/api/settings')]);
+    const items = [
+      ['转写线程', d.cpu_threads + (d.cpu_count ? ' / ' + d.cpu_count + ' 核' : '')],
+      ['抽音频并发', s.extract_workers], ['转写并发', s.asr_workers], ['翻译并发', s.translate_workers],
+      ['beam size', s.beam_size], ['批推理', s.asr_batch_size > 1 ? s.asr_batch_size + ' 条' : '关闭'],
+      ['请求间隔', s.translate_min_interval + ' 秒'], ['每分钟上限', s.translate_rpm ? s.translate_rpm + ' 次' : '不限'],
+      ['429 冷却', s.translate_429_backoff + ' 秒'], ['单阶段重试', s.max_attempts + ' 次'],
+    ];
+    box.innerHTML = items.map(([k, v]) =>
+      `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join('');
+  } catch (e) { box.textContent = '读取失败：' + e.message; }
 }
 
 async function loadDevice() {
@@ -344,6 +599,26 @@ async function loadDevice() {
   }
 }
 
+async function loadAccount() {
+  const hint = $('acctHint');
+  try {
+    const a = await api('/api/account');
+    $('accountForm').elements.namedItem('username').value = a.username || 'admin';
+    if (!a.editable) {
+      hint.textContent = '⛔ ' + a.locked_reason;
+      hint.style.color = 'var(--warn)';
+      for (const el of $('accountForm').elements) if (el.name) el.disabled = true;
+      $('accountForm').querySelector('button[type="submit"]').disabled = true;
+    } else {
+      const from = {env: '当前口令来自环境变量', file: '当前口令存在 data/account.json',
+                    legacy: '已从旧版 admin-password.txt 迁移过来', new: '本次运行自动生成的初始口令',
+                    memory: '数据目录不可写，口令只在内存里，重启会变'}[a.source] || '';
+      hint.textContent = from + `　｜　口令至少 ${a.min_password_len} 位。改了之后所有设备都要重新登录。`;
+      hint.style.color = 'var(--muted)';
+    }
+  } catch (e) { hint.textContent = '读取失败：' + e.message; }
+}
+
 async function loadAi() {
   const data = await api('/api/settings');
   $('aiform').elements.namedItem('web_public_url').value = data.web_public_url || '';
@@ -354,20 +629,60 @@ async function loadAi() {
     `${e.method.padEnd(4)} ${e.path}\n     ${e.desc}`).join('\n');
 }
 
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('jav-theme', t); } catch (e) {}
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+}
+(function initTheme() {
+  let t = 'light';
+  try { t = localStorage.getItem('jav-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+  applyTheme(t);
+})();
+
 function refresh() { refreshStats(); refreshJobs(); }
+const VIEWS = {stack: 'stackView', log: 'logView', set: 'setView'};
+const UI_KEY = 'jav-ui';
+// 记下当前状态：刷新页面（F5）后要停回原来那页、原目录、原筛选，不默认跳回媒体库
+let _uiSnap = '';
+function saveUi() {
+  try {
+    const snap = JSON.stringify({
+      view: state.view || 'stack',
+      libPath: state.libPath || '',
+      status: $('statusFilter').value,
+      stage: $('stageFilter').value,
+      q: $('search').value.trim(),
+      page: state.page || 1,
+    });
+    if (snap === _uiSnap) return;   // 每 4 秒刷新也会走到这，值没变就不写盘
+    _uiSnap = snap;
+    localStorage.setItem(UI_KEY, snap);
+  } catch (e) {}
+}
+function readUi() {
+  try { return JSON.parse(localStorage.getItem(UI_KEY) || 'null'); } catch (e) { return null; }
+}
 function show(view) {
-  const tabs = {lib:'libView', jobs:'jobsView', set:'setView', ai:'aiView'};
-  for (const [k, id] of Object.entries(tabs)) $(id).hidden = (k !== view);
-  for (const k of Object.keys(tabs)) {
+  state.view = view;
+  for (const [k, id] of Object.entries(VIEWS)) $(id).hidden = (k !== view);
+  for (const k of Object.keys(VIEWS)) {
     const btn = $('tab' + k[0].toUpperCase() + k.slice(1));
     if (btn) btn.classList.toggle('on', k === view);
   }
+  saveUi();
 }
 
-$('tabLib').onclick = () => { show('lib'); loadLibrary(state.libPath); };
-$('tabJobs').onclick = () => { show('jobs'); refresh(); };
-$('tabSet').onclick = () => { show('set'); loadSettings().catch(e => notice(e.message)); };
-$('tabAi').onclick = () => { show('ai'); loadAi().catch(e => notice(e.message)); };
+$('tabStack').onclick = () => { show('stack'); loadLibrary(state.libPath); refresh(); };
+$('tabLog').onclick = () => { show('log'); loadLogs(); };
+$('tabSet').onclick = () => {
+  show('set');
+  loadAccount().catch(e => toast('账号读取失败：' + e.message, 'err'));
+  loadSettings().catch(e => toast('设置读取失败：' + e.message, 'err'));
+  loadAi().catch(e => toast('接入信息读取失败：' + e.message, 'err'));
+};
 for (const id of ['statusFilter', 'stageFilter']) $(id).onchange = () => { state.page = 1; refreshJobs(); };
 $('search').oninput = () => { state.page = 1; clearTimeout(window._t); window._t = setTimeout(refreshJobs, 300); };
 $('prev').onclick = () => { if (state.page > 1) { state.page--; refreshJobs(); } };
@@ -376,60 +691,77 @@ $('libUp').onclick = async () => {
   const lib = await api('/api/library?path=' + encodeURIComponent(state.libPath));
   loadLibrary(lib.parent || '');
 };
-$('checkAll').onchange = e => { for (const el of document.querySelectorAll('.pick')) el.checked = e.target.checked; };
+function syncEnqueueBtn() {
+  const picked = [...document.querySelectorAll('.pick')].filter(el => el.checked).length;
+  const btn = $('enqueueSel');
+  btn.disabled = picked === 0;
+  btn.textContent = picked ? `加入队列（${picked}）` : '加入队列';
+}
+$('libRows').addEventListener('change', e => { if (e.target.classList.contains('pick')) syncEnqueueBtn(); });
+$('checkAll').onchange = e => { for (const el of document.querySelectorAll('.pick')) el.checked = e.target.checked; syncEnqueueBtn(); };
 $('enqueueSel').onclick = async () => {
   const picks = [...document.querySelectorAll('.pick')].filter(el => el.checked).map(el => el.dataset.path);
   const targets = picks.length ? picks : [state.libPath];
   const limit = Number($('limitN').value || 0);
   let total = 0;
+  const btn = $('enqueueSel');
   try {
-    notice('正在入队…');
-    for (const p of targets) {
-      const r = await api('/api/enqueue', 'POST', {path: p, force: true, limit});
-      total += r.queued;
-    }
-    notice(`已入队 ${total} 部。任务会按队列一部一部往下跑。`);
+    await withBusy(btn, '入队中…', async () => {
+      for (const p of targets) {
+        const r = await api('/api/enqueue', 'POST', {path: p, force: true, limit});
+        total += r.queued;
+      }
+    });
+    if (total > 0) toast(`已入队 ${total} 部，队列会一部一部往下跑`);
+    else toast('这些目录里的视频都已在队列中，没有新增', 'info');
     loadLibrary(state.libPath);
     refreshStats();
-  } catch (e) { notice('入队失败：' + e.message); }
+  } catch (e) { toast('入队失败：' + e.message, 'err'); }
 };
 $('reindex').onclick = async () => {
   try {
-    notice('正在索引…（大目录可能要几十秒）');
-    const r = await api('/api/scan', 'POST');
-    notice(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部。${r.auto_enqueue ? '' : '索引只统计，不会自动排队——请勾选目录后点「加入队列」。'}`);
+    const r = await withBusy($('reindex'), '索引中…', () => api('/api/scan', 'POST'));
+    toast(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部` +
+          (r.auto_enqueue ? '' : '（只统计，不会自动排队）'));
     loadLibrary(state.libPath);
     refreshStats();
-  } catch (e) { notice(e.message); }
+  } catch (e) { toast('索引失败：' + e.message, 'err'); }
 };
 $('scan').onclick = async () => {
   try {
-    notice('正在索引…');
-    const r = await api('/api/scan', 'POST');
-    notice(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部。`);
+    const r = await withBusy($('scan'), '索引中…', () => api('/api/scan', 'POST'));
+    toast(`索引完成：新发现 ${r.discovered} 部，更新 ${r.updated} 部`);
     refresh();
-  } catch (e) { notice(e.message); }
+  } catch (e) { toast('索引失败：' + e.message, 'err'); }
 };
 $('toggle').onclick = async () => {
   try {
     const paused = $('toggle').dataset.paused === '1';
-    await api(paused ? '/api/queue/resume' : '/api/queue/pause', 'POST', paused ? undefined : {reason:'手动暂停'});
+    await withBusy($('toggle'), '处理中…', () =>
+      api(paused ? '/api/queue/resume' : '/api/queue/pause', 'POST', paused ? undefined : {reason:'手动暂停'}));
+    toast(paused ? '队列已恢复' : '队列已暂停，正在跑的会跑完');
     refresh();
-  } catch (e) { notice(e.message); }
+  } catch (e) { toast(e.message, 'err'); }
 };
 $('retryAll').onclick = async () => {
-  try { const r = await api('/api/jobs/retry-failed', 'POST'); notice(`已重新排队 ${r.count} 个失败任务`); refresh(); }
-  catch (e) { notice(e.message); }
+  try {
+    const r = await withBusy($('retryAll'), '重试中…', () => api('/api/jobs/retry-failed', 'POST'));
+    toast(r.count ? `已重新排队 ${r.count} 个失败任务` : '没有失败任务需要重试', r.count ? 'ok' : 'info');
+    refresh();
+  } catch (e) { toast(e.message, 'err'); }
 };
 $('copyToken').onclick = async () => {
   const v = $('tokenValue').value;
-  try { await navigator.clipboard.writeText(v); notice('token 已复制'); }
-  catch { $('tokenValue').select(); notice('已选中，按 Ctrl+C 复制'); }
+  try { await navigator.clipboard.writeText(v); toast('token 已复制到剪贴板'); }
+  catch { $('tokenValue').select(); toast('已选中，按 Ctrl+C 复制', 'info'); }
 };
 $('rotateToken').onclick = async () => {
   if (!confirm('重新生成后旧 token 立即失效，确定？')) return;
-  try { const r = await api('/api/ai/token/rotate', 'POST', {}); $('tokenValue').value = r.token; notice('新 token 已生成'); }
-  catch (e) { notice(e.message); }
+  try {
+    const r = await api('/api/ai/token/rotate', 'POST', {});
+    $('tokenValue').value = r.token;
+    toast('新 token 已生成，旧 token 立即失效');
+  } catch (e) { toast(e.message, 'err'); }
 };
 $('aiform').onsubmit = async e => {
   e.preventDefault();
@@ -439,8 +771,8 @@ $('aiform').onsubmit = async e => {
       web_public_url: f.namedItem('web_public_url').value,
       api_token_readonly: f.namedItem('api_token_readonly').checked
     });
-    notice('接入设置已保存');
-  } catch (err) { notice(err.message); }
+    toast('接入设置已保存');
+  } catch (err) { toast('保存失败：' + err.message, 'err'); }
 };
 $('close').onclick = () => $('dlg').close();
 $('settings').onsubmit = async e => {
@@ -450,14 +782,115 @@ $('settings').onsubmit = async e => {
     if (!el.name) continue;
     data[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
   }
-  try { await api('/api/settings', 'PUT', data); notice('设置已保存，下一次领取任务即生效'); refreshStats(); loadDevice(); }
-  catch (err) { notice(err.message); }
+  const btn = e.target.querySelector('button[type="submit"]');
+  try {
+    await withBusy(btn, '保存中…', () => api('/api/settings', 'PUT', data));
+    toast('设置已保存，下一次领取任务即生效');
+    syncProviderGroups(); refreshStats(); loadDevice();
+  } catch (err) { toast('保存失败：' + err.message, 'err'); }
 };
 
-show('lib');
-loadLibrary('');
-refreshStats();
-setInterval(() => { if (!$('jobsView').hidden) refresh(); else refreshStats(); }, 4000);
+// ---------------------------------------------------------------- 日志页
+const LEVEL_TEXT = {info: '一般', warn: '警告', error: '错误'};
+
+async function loadLogs() {
+  const level = $('logLevel').value;
+  const params = new URLSearchParams({limit: 200});
+  if (level) params.set('level', level);
+  try {
+    const rows = await api('/api/logs?' + params);
+    const body = $('logRows');
+    const seen = new Set([...body.querySelectorAll('tr')].map(tr => tr.dataset.id));
+    body.innerHTML = rows.map(r => `<tr data-id="${r.id}" class="${seen.has(String(r.id)) ? '' : 'new'}">
+        <td class="t">${esc(String(r.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+        <td><span class="lvl ${esc(r.level || 'info')}">${esc(LEVEL_TEXT[r.level] || r.level || '一般')}</span></td>
+        <td>${esc(r.message || '')}${r.job_id ? `<span class="hint"> — 任务 #${r.job_id}</span>` : ''}</td>
+      </tr>`).join('') || '<tr><td class="empty" colspan="3">还没有日志。跑一次索引或入队就会有。</td></tr>';
+    $('logInfo').textContent = `共 ${rows.length} 条` + (level ? `（只显示「${LEVEL_TEXT[level]}」）` : '');
+    if ($('logFollow').checked) {
+      const wrap = body.closest('.tablewrap');
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }
+  } catch (e) { toast('日志读取失败：' + e.message, 'err'); }
+}
+$('logLevel').onchange = loadLogs;
+$('logRefresh').onclick = loadLogs;
+
+// ---------------------------------------------------------------- 账号保存
+$('accountForm').onsubmit = async e => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const pwd = f.namedItem('password').value;
+  const pwd2 = f.namedItem('password2').value;
+  if (pwd !== pwd2) { toast('两次输入的新口令不一致', 'err'); return; }
+  if (pwd && pwd.length < 8) { toast('新口令至少 8 位', 'err'); return; }
+  const btn = e.target.querySelector('button[type="submit"]');
+  try {
+    const r = await withBusy(btn, '保存中…', () => api('/api/account', 'POST', {
+      username: f.namedItem('username').value,
+      current_password: f.namedItem('current_password').value,
+      password: pwd,
+    }));
+    f.namedItem('current_password').value = '';
+    f.namedItem('password').value = '';
+    f.namedItem('password2').value = '';
+    toast(pwd ? `账号口令已更新，下次登录用「${r.username}」` : `用户名已改为「${r.username}」`);
+    loadAccount();
+  } catch (err) { toast('保存失败：' + err.message, 'err'); }
+};
+
+function syncProviderGroups() {
+  const cur = $('provider').value;
+  for (const g of document.querySelectorAll('.pgroup')) g.hidden = g.dataset.provider !== cur;
+}
+$('provider').onchange = syncProviderGroups;
+
+$('testTr').onclick = async () => {
+  const out = $('testTrOut');
+  out.textContent = '正在请求上游…';
+  out.style.color = 'var(--muted)';
+  try {
+    const r = await api('/api/translate/test', 'POST', {});
+    if (r.ok) {
+      out.style.color = 'var(--ok)';
+      out.textContent = `${r.provider} 正常（${r.seconds}s）：${r.source} → ${r.target}`;
+    } else {
+      out.style.color = 'var(--bad)';
+      out.textContent = `${r.provider} 失败：${r.error}`;
+    }
+  } catch (e) {
+    out.style.color = 'var(--bad)';
+    out.textContent = '测试请求失败：' + e.message;
+  }
+};
+
+(function boot() {
+  const saved = readUi();
+  if (saved) {
+    if (saved.status) $('statusFilter').value = saved.status;
+    if (saved.stage) $('stageFilter').value = saved.stage;
+    if (saved.q) $('search').value = saved.q;
+    state.page = Math.max(1, parseInt(saved.page, 10) || 1);
+  }
+  const view = saved && VIEWS[saved.view] ? saved.view : 'stack';
+  show(view);
+  refreshStats();
+  if (view === 'log') {
+    loadLogs();
+  } else if (view === 'set') {
+    loadAccount().catch(e => toast('账号读取失败：' + e.message, 'err'));
+    loadSettings().catch(e => toast('设置读取失败：' + e.message, 'err'));
+    loadAi().catch(e => toast('接入信息读取失败：' + e.message, 'err'));
+  } else {
+    loadLibrary((saved && saved.libPath) || '');
+    refreshJobs();
+  }
+})();
+setInterval(() => {
+  if (!$('logView').hidden) { loadLogs(); return; }
+  if (!$('stackView').hidden) refresh(); else refreshStats();
+}, 4000);
 </script>
+</div>
 </body>
 </html>
