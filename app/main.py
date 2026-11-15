@@ -14,6 +14,7 @@ import os
 import secrets
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -368,9 +369,13 @@ def get_account():
 
 @app.post("/api/account")
 def set_account(body: AccountBody, request: Request):
-    """改登录账号与口令。要验当前口令，成功后重种 Cookie，不会把自己踢出去。"""
+    """改登录账号与口令。已登录即可改，不要求再验一次旧口令。
+
+    页面上只留「用户名 + 新口令」两栏，少一道确认少一次卡壳。
+    旧的 current_password 字段仍然接受：带上就校验，带错照样拒绝。
+    """
     user, password = web_credentials()
-    if not secrets.compare_digest((body.current_password or ""), password):
+    if body.current_password and not secrets.compare_digest(body.current_password, password):
         time.sleep(0.4)
         raise HTTPException(400, "当前口令不对")
     target_user = (body.username or "").strip() or user
@@ -435,6 +440,8 @@ def do_logout():
 
 class SettingsPatch(BaseModel):
     media_root: str | None = None
+    source_language: str | None = None
+    target_language: str | None = None
     whisper_model: str | None = None
     cpu_threads: int | None = None
     beam_size: int | None = None
@@ -464,6 +471,8 @@ class SettingsPatch(BaseModel):
     scrape_enabled: bool | None = None
     scrape_providers: str | None = None
     scrape_prefer: str | None = None
+    scrape_min_interval: float | None = None
+    scrape_hourly_limit: int | None = None
     subdl_api_key: str | None = None
     opensubtitles_api_key: str | None = None
     schedule_enabled: bool | None = None
@@ -511,6 +520,12 @@ def get_settings():
     return load_settings().safe_dict()
 
 
+@app.get("/api/settings/defaults")
+def get_settings_defaults():
+    """设置页「重置」用：程序内置默认值。不落库，只回给前端填表。"""
+    return Settings().safe_dict()
+
+
 @app.put("/api/settings")
 def set_settings(patch: SettingsPatch):
     current = load_settings()
@@ -520,19 +535,27 @@ def set_settings(patch: SettingsPatch):
                      "subdl_api_key", "opensubtitles_api_key")
     for key, value in changes.items():
         if key in secret_fields:
-            if value == "********":
+            # 页面回传的掩码（全是星号）不能落库，否则之后真请求就是 403
+            if isinstance(value, str) and value and set(value) == {"*"}:
                 continue
             # 从聊天/网页粘进来的 key 常带引号、空格、甚至 "Bearer " 前缀，
             # 原样塞进请求头会被上游判成无效 token，这里统一收拾干净。
             value = clean_secret(value)
         if key == "translate_provider":
             value = normalize_provider(value)
+        if key == "scrape_providers":
+            # 界面上已经没有这个选项了，老库里存的 kitsunekko/subdl 之类顺手收敛掉
+            value = "subtitlecat"
         if key == "translate_fallback":
             # 顺手去重、去掉主渠道自己，存成规范的 "google,bing"
             value = ",".join(p for p in parse_fallback(value)
                              if p != normalize_provider(patch.translate_provider
                                                        or data.get("translate_provider", "")))
         data[key] = value
+    # 刮削平台界面上已不可选：无论这次有没有提交这个字段，库里都收敛成 subtitlecat
+    data["scrape_providers"] = "subtitlecat"
+    # 刮削是必经步骤，界面也不给开关，老库里存的 false 一并纠正
+    data["scrape_enabled"] = True
     updated = Settings.from_dict(data)
     save_settings(updated)
     # 模型或线程数变了就把已加载的实例丢掉，否则旧实例会一直沿用
@@ -693,25 +716,62 @@ def translate_providers():
 class TranslateTestBody(BaseModel):
     provider: str | None = None
     text: str | None = None
+    # 设置页表单里还没点保存的值。测试要测「你现在在页面上选的渠道 + 你现在填的 key」，
+    # 而不是上一次保存进库的那套 —— 否则选了 openai 却回 deepl 的结果（真发生过）。
+    openai_base_url: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str | None = None
+    google_api_key: str | None = None
+    deepl_api_key: str | None = None
+    deepl_api_url: str | None = None
+
+
+_TEST_OVERRIDES = ("openai_base_url", "openai_api_key", "openai_model",
+                   "google_api_key", "deepl_api_key", "deepl_api_url")
+
+
+def _merge_test_overrides(settings, body: TranslateTestBody):
+    """把表单里填了的值盖到已保存的设置上。
+
+    空字符串 / 掩码 ******** 一律视为「没填」，继续用库里存的，
+    免得用户只改了个模型名就把已经填好的 key 抹成空。
+    """
+    changes: dict = {}
+    for key in _TEST_OVERRIDES:
+        value = getattr(body, key, None)
+        if value is None:
+            continue
+        value = value.strip()
+        if not value or value == "********":
+            continue
+        changes[key] = clean_secret(value) if key.endswith("_api_key") else value
+    return replace(settings, **changes) if changes else settings
 
 
 @app.post("/api/translate/test")
 def translate_test(body: TranslateTestBody | None = None):
-    """拿当前（或指定）渠道真发一句，把上游原话回给界面。
+    """拿指定（或当前）渠道真发一句，把上游原话回给界面。
 
     这就是排查「key 在别处能用、到这儿 401」最直接的办法：
     看到的错误是上游返回的原文，不是我加工过的猜测。
     """
     body = body or TranslateTestBody()
-    settings = load_settings()
+    settings = _merge_test_overrides(load_settings(), body)
     provider = normalize_provider(body.provider or settings.translate_provider)
+    # 「测试这一档」就只测这一档：把降级链关掉。
+    # 否则 deepl 的 key 是空的，链子悄悄落到必应，页面上却显示「deepl 正常」——
+    # 那是骗人的（用户就撞到过：选 openai 却回 deepl 的结果）。
+    settings = replace(settings, translate_fallback="")
     text = (body.text or "こんにちは、今日はいい天気ですね。").strip() or "こんにちは"
     started = time.time()
     engine = build_translator(provider, settings)
     diag: dict = {}
     # DeepL 的 403 几乎全是 key 本身的问题：把 key 的形状和当月额度一并带回去，
     # 用户一眼能看出「是没粘全 / 少了 :fx / 订阅没生效 / 额度用光」中的哪一种。
-    if engine.key_report():
+    # 压根没填 key 的时候不往界面上堆这堆诊断——错误信息已经说清「没填密钥」了。
+    has_key = {"deepl": bool(settings.deepl_api_key),
+               "openai": bool(settings.openai_api_key)}.get(provider, True)
+    if has_key and engine.key_report():
         diag["key"] = engine.key_report()
         try:
             diag["usage"] = engine.usage()
@@ -790,17 +850,19 @@ class ScrapeTestBody(BaseModel):
 
 @app.get("/api/scrape/status")
 def scrape_status():
-    """每个字幕站现在能不能用、为什么不能用。"""
+    """刮削现在能不能用、限速到什么程度。"""
     settings = load_settings()
     return {"providers": scraping.provider_status(settings),
-            "order": scraping.parse_order(settings.scrape_providers)
-                     or scraping.default_order(),
-            "enabled": settings.scrape_enabled}
+            "order": scraping.active_order(settings.scrape_providers),
+            "enabled": True,
+            "interval": settings.scrape_min_interval,
+            "hourly_limit": settings.scrape_hourly_limit,
+            "gate": scraping.GATE.snapshot()}
 
 
 @app.post("/api/scrape/test")
 def scrape_test(body: ScrapeTestBody):
-    """拿一个片名真跑一遍刮削，把每个平台的结果原样返回，方便判断该用哪个。"""
+    """拿一个片名真跑一遍刮削，把结果原样返回。"""
     settings = load_settings()
     name = body.name.strip()
     if not name:
@@ -815,10 +877,12 @@ def scrape_test(body: ScrapeTestBody):
     if not name:
         raise HTTPException(400, "没有可测试的文件名，请手动填一个")
     probe = Settings.from_dict({**settings.safe_dict(), "scrape_enabled": True})
-    result = scraping.scrape(name, probe)
+    # wait=False：按钮点一下不该卡二十秒。间隔没到就直接把「还要等几秒」回给界面。
+    result = scraping.scrape(name, probe, wait=False)
     return {"name": name, "ok": result.ok, "provider": result.provider,
             "language": result.language, "cues": len(result.cues),
-            "source": result.source_name, "tried": result.tried}
+            "source": result.source_name, "tried": result.tried,
+            "notes": result.notes}
 
 
 # ------------------------------------------------------------------ AI access
@@ -893,7 +957,8 @@ def logs(limit: int = 100, since_id: int = 0, level: str = ""):
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM events{clause} ORDER BY id DESC LIMIT ?", (*params, limit)).fetchall()
-    return [dict(r) for r in reversed(rows)]
+    # 新的在上：直接按 id 倒序返回，前端不再翻转
+    return [dict(r) for r in rows]
 
 
 @app.get("/api/ai/token")
@@ -930,4 +995,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.9"}
+    return {"ok": True, "version": "3.10"}

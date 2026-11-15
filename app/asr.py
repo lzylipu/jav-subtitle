@@ -44,12 +44,25 @@ def probe_duration(video: Path) -> float:
 
 def extract_audio(video: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
+    proc = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
          "-i", str(video), "-vn", "-ac", "1", "-ar", "16000",
          "-c:a", "pcm_s16le", str(output)],
-        check=True, capture_output=True, text=True, timeout=3600,
+        capture_output=True, text=True, timeout=3600,
     )
+    if proc.returncode == 0:
+        return
+    # ffmpeg 的原始报错（一长串命令行 + returncode 183）对用户毫无意义，
+    # 真正的原因几乎都是「文件损坏 / 不是视频 / 没有音轨」，直接说清楚。
+    detail = (proc.stderr or "").strip().splitlines()
+    tail = detail[-1][:200] if detail else ""
+    if not video.is_file():
+        raise ValueError(f"视频文件不存在：{video}")
+    if "does not contain any stream" in (proc.stderr or "") or "no stream" in (proc.stderr or ""):
+        raise ValueError(f"视频里没有音轨，无法转写：{video.name}")
+    raise ValueError(
+        f"视频解码失败，文件可能损坏或不是视频：{video.name}"
+        + (f"（{tail}）" if tail else ""))
 
 
 def get_model(name: str, cpu_threads: int):

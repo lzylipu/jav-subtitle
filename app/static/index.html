@@ -12,7 +12,7 @@
 *{box-sizing:border-box}
 body{margin:0;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans SC",sans-serif;background:var(--stage);min-height:100vh}
 .stage{position:fixed;inset:0;z-index:-1;background:var(--glow)}
-.shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+.shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
 aside{margin:12px;padding:16px 12px;border-radius:22px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:6px}
 .brand{display:flex;gap:10px;align-items:center;margin:0 0 16px}
 .brandbox{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
@@ -39,13 +39,9 @@ main{padding:12px 16px 16px 12px;min-width:0;display:flex;flex-direction:column;
 .pane{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:var(--glass);border:1px solid var(--line);border-radius:22px;padding:18px;backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow)}
 .pane[hidden]{display:none}
 #libView,#jobsView{flex:1 1 auto;min-height:0;overflow:hidden}
-.stack{flex:1 1 auto;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.stack{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);grid-template-rows:minmax(0,1fr);gap:12px}
 .stack .pane{flex:1 1 auto;min-height:0}
 #setView .pane, #logView{min-height:0}
-.perf{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
-.perf div{background:var(--fill);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
-.perf b{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-bottom:2px}
-.perf span{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
 .lvl{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .lvl.info{background:rgba(66,153,225,.16);color:#2b6cb0}
 .lvl.warn{background:rgba(255,159,10,.18);color:#b06f00}
@@ -58,15 +54,24 @@ main{padding:12px 16px 16px 12px;min-width:0;display:flex;flex-direction:column;
 #logRows tr.new td{animation:flash 1.2s ease-out}
 @keyframes flash{from{background:rgba(66,153,225,.16)}to{background:transparent}}
 #setView{display:block;overflow-y:auto;overflow-x:hidden}
+/* 设置页顶部：标题在左，保存/取消/重置固定在右上；整页只有这一处保存
+   不要底色/毛玻璃/边框/圆角 —— 它只是标题行，贴在卡片里就行，加底色会看成一条阴影带 */
+.setHead{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;
+  padding:0 0 12px;margin-bottom:6px;background:transparent}
+.setTitle{min-width:0}
+.setTitle h2{margin:0 0 4px}
+.setTitle .hint{margin:0}
+.setActions{display:flex;gap:8px;flex:none;padding-top:2px}
+.setActions button{min-width:74px;white-space:nowrap}
 #setView>*:last-child{margin-bottom:2px}
 #stackView[hidden],#setView[hidden],#logView[hidden]{display:none}
 h2{margin:0 0 6px;font-size:18px}
 .hint{color:var(--muted);font-size:12px;line-height:1.5}
-.stats{display:flex;flex-wrap:wrap;margin:0;background:var(--glass);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--shadow);overflow:hidden}
-.stat{flex:1 1 0;min-width:0;padding:10px 12px;border-left:1px solid var(--line)}
+.stats{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);flex:none;height:56px;margin:0;background:var(--glass);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--shadow);overflow:hidden}
+.stat{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0;padding:0 10px;border-left:1px solid var(--line);overflow:hidden}
 .stat:first-child{border-left:0}
-.stat b{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stat span{display:block;font-size:16px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat b{display:block;color:var(--muted);font-size:11px;font-weight:500;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat span{display:block;font-size:15px;font-weight:650;line-height:1.35;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat.soft span{color:var(--muted);font-weight:550}
 .stat.alert span{color:var(--bad)}
 .stat.warm span{color:var(--warn)}
@@ -74,14 +79,44 @@ button{border:1px solid var(--line);border-radius:12px;padding:9px 12px;backgrou
 button:hover{background:var(--field)}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 button.ghost{background:var(--fill);color:var(--ink)}
-button.mini{padding:6px 9px;font-size:13px}
+button.mini{padding:6px 9px;font-size:13px;white-space:nowrap}
+/* 操作列：记录/重试永远同一行，不许换行挤压；窄屏宁可表格内部横向滚动，也不压按钮 */
+th.act,td.act{white-space:nowrap;width:120px}
+#jobsView table{min-width:620px}
+#libView th,#libView td.dir{white-space:nowrap}
+#libView th{font-size:10.5px;padding-left:6px;padding-right:6px}
+#libView td{padding-left:6px;padding-right:6px}
+#libView table{min-width:280px;table-layout:fixed}
+#libView td.dir,#libView th{overflow:hidden;text-overflow:ellipsis}
+td.act button+button{margin-left:6px}
 button:disabled{opacity:.45;cursor:default}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
 .bar .inline{flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px;white-space:nowrap}
 .bar .inline input{width:74px;text-align:center;padding:8px 6px}
 .pgroup{display:contents}
+/* 翻译渠道：三档顺序，每档的配置跟着它自己的测试按钮走 */
+.chList{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,.6fr);gap:10px;align-items:start}
+.chSlot{display:grid;gap:9px;padding:10px 12px 12px;border:1px solid var(--line);border-radius:14px;background:var(--field)}
+.chRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chIdx{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--glass);border:1px solid var(--line);font-size:11.5px;font-weight:700;color:var(--muted)}
+.chPick{flex:1 1 140px;min-width:0}
+.chTest{flex:none;min-width:64px;white-space:nowrap}
+.chCfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px 14px}
+.chCfg:empty{display:none}
+.chOut{font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.chOut:empty{display:none}
+@media(max-width:760px){.chCfg{grid-template-columns:1fr}.chList{grid-template-columns:1fr}}
 .pgroup[hidden]{display:none}
 .bar select{width:auto;min-width:132px;flex:0 0 auto}
+/* 刮削：三个字段一行；「测试刮削」塞进输入框所在的那一格，天然同一行同一高度 */
+fieldset.scrapeGrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.5fr)}
+.hrsRow{display:flex;gap:8px;align-items:center;min-width:0}
+.hrsRow input{flex:1 1 auto;min-width:0}
+.hrsRow button{flex:none;white-space:nowrap}
+#scrapeOut:empty{display:none}
+/* 流程说明和刮削状态同一行，右边贴右 */
+.scrapeFoot{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:baseline;justify-content:space-between}
+.scrapeFoot .hint{grid-column:auto}
 .bar input{width:auto}
 .bar input#search{flex:1 1 200px;min-width:160px}
 input,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:9px 10px;font:inherit;background:var(--field);color:var(--ink);min-width:0}
@@ -125,8 +160,23 @@ td.msg{overflow-wrap:anywhere;color:var(--muted)}
 .prog{height:6px;background:var(--field);border-radius:4px;overflow:hidden;margin-top:6px}
 .prog i{display:block;height:100%;background:var(--accent)}
 .pager{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:var(--muted);flex:none}
-form{display:grid;grid-template-columns:1fr;gap:12px;max-width:1000px}
-fieldset{border:1px solid var(--line);border-radius:18px;padding:14px 16px 16px;background:var(--fill);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;margin:0}
+form{display:grid;grid-template-columns:1fr;gap:12px;max-width:100%;min-width:0}
+/* 设置页一律单列纵向排：所有分组卡片从上到下依次排，卡片内部也一行一项，不做横向分栏 */
+#setCards{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+/* 登录账号就两个短字段，固定两列 */
+#accountForm fieldset{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+fieldset{border:1px solid var(--line);border-radius:18px;padding:14px 16px 16px;background:var(--fill);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 14px;align-items:start;margin:0}
+/* .w = 需要整行宽度的字段（路径 / 密钥 / token 这类长内容） */
+.w{grid-column:1/-1}
+/* 卡片里字段少的时候固定列数，免得右边空出一条轨 */
+fieldset.c2{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* 同一张卡片里的分节小标题 + 一行排开的几个短字段 */
+.subTitle{grid-column:1/-1;font-size:12px;font-weight:700;letter-spacing:.3px;color:var(--muted);
+  padding-top:12px;margin-top:2px;border-top:1px solid var(--line)}
+.trRow{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 14px;align-items:start}
+.chkRow{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 14px}
+fieldset.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+fieldset.c211{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}
 /* 分组标题：卡片内的一行标题 + 下面一条贯穿整宽的分隔线（不再骑在边框线上） */
 .fsTitle{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;letter-spacing:.4px;color:var(--ink);padding:0 0 10px;margin:0 0 2px;border-bottom:1px solid var(--line)}
 label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}
@@ -134,14 +184,23 @@ label.check{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-
 .hint{grid-column:1/-1}
 form>button{justify-self:start}
 dialog{border:1px solid var(--line);border-radius:22px;padding:18px;max-width:min(760px,92vw);width:100%;background:var(--glass);color:var(--ink);backdrop-filter:blur(28px) saturate(160%);box-shadow:var(--shadow)}
+#cleanDlg{max-width:min(720px,94vw)}
+.cleanBody{display:grid;gap:14px}
+.cleanBody>label{font-size:12px;color:var(--muted);display:grid;gap:5px}
+.cleanBody .cleanGrid{grid-column:auto}
+.dlgActions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}
+.dlgActions button{min-width:96px;white-space:nowrap}
 dialog::backdrop{background:rgba(15,23,42,.38)}
 dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:55vh;overflow:auto;background:var(--field);border-radius:12px;padding:12px}
 .crumb{font-size:13px;color:var(--muted);margin-bottom:10px;overflow-wrap:anywhere}
 .crumb a{color:var(--accent);cursor:pointer;text-decoration:none}
 .num,.mono{font-variant-numeric:tabular-nums}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.tokenbox{display:flex;gap:8px;grid-column:1/-1;align-items:center}
-.tokenbox input{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.tokenbox{display:flex;gap:8px;grid-column:1/-1;align-items:center;min-width:0}
+.tokenbox input{flex:1 1 0;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.tokenbox .mini{flex:none;white-space:nowrap}
+/* AI 接入：地址 / token 同排，token 那边要长得多，给它更宽一列 */
+.aiGrid{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr)}
 /* 清理面板：六项checkbox排两列，每项带一行灰字说明 */
 .cleanGrid{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 18px}
 .cleanGrid label.check{align-items:flex-start}
@@ -149,6 +208,12 @@ dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height
 button.danger{background:linear-gradient(180deg,#ff5f52,#e0342a);border-color:rgba(0,0,0,.12);color:#fff;font-weight:600}
 button.danger:disabled{opacity:.45;filter:grayscale(.5)}
 pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px;padding:12px;font-size:12px;overflow:auto;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+@media(max-width:1360px) and (min-width:761px){
+  .stats{grid-auto-flow:row;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:52px;height:104px;flex:none}
+  .stat{padding:0 8px}
+  .stat:nth-child(6n+1){border-left:0}
+  .stat:nth-child(n+7){border-top:1px solid var(--line)}
+}
 @media(min-width:761px){
   html,body{height:100%;overflow:hidden}
   .shell{height:100vh}
@@ -157,6 +222,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
 }
 @media(max-width:760px){
   .shell{grid-template-columns:1fr}
+  .stack{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
   aside{position:static;height:auto;margin:8px 8px 0;padding:10px}
   .brand{margin-bottom:10px}
   nav{flex-direction:row;overflow-x:auto;gap:4px;padding-bottom:2px}
@@ -165,12 +231,38 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
   aside .foot{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
   main{padding:8px}
   .pane{min-height:0;padding:14px;border-radius:18px}
-  fieldset{grid-template-columns:1fr}
-  .perf{grid-template-columns:repeat(2,minmax(0,1fr))}
-  th:nth-child(2),td:nth-child(2){display:none}
-  .stats{gap:6px}
-  .stat{min-width:0;flex:1 1 92px;padding:6px 10px}
-  .stat span{font-size:15px}
+  .setHead{flex-direction:column;gap:10px}
+  .setActions{width:100%}
+  .setActions button{flex:1 1 0}
+  fieldset,fieldset.c2,fieldset.c3,fieldset.c211,fieldset.scrapeGrid,#accountForm fieldset,.trRow,.chkRow{grid-template-columns:1fr}
+  .scrapeFoot{flex-direction:column}
+  .aiGrid{grid-template-columns:1fr}
+  /* 手机：表格不硬挤，改成横向滚动，别把「目录 / 状态」这些关键列直接藏掉 */
+  table{min-width:680px}
+  .bar{gap:6px}
+  .bar>.ghost,.bar>.primary{padding:8px 11px;font-size:13px}
+  h2{font-size:16px}
+  .pane>h2{margin:0 0 4px}
+  .stats{grid-auto-flow:row;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:50px;height:100px;flex:none}
+  .stat{padding:0 6px;border-left:1px solid var(--line)}
+  .stat:nth-child(6n+1){border-left:0}
+  .stat:nth-child(n+7){border-top:1px solid var(--line)}
+  .stat b{font-size:10px}
+  .stat span{font-size:13px}
+}
+/* 手机竖屏：6 列太挤（「近 1 分请求」会被截成省略号），改成 5 列 × 2 行 */
+@media(max-width:480px){
+  .stats{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:48px;height:96px}
+  .stat{padding:0 5px}
+  .stat:nth-child(6n+1){border-left:1px solid var(--line)}
+  .stat:nth-child(5n+1){border-left:0}
+  .stat:nth-child(n+6){border-top:1px solid var(--line)}
+  .stat b{font-size:9.5px;letter-spacing:0}
+  .stat span{font-size:12.5px}
+  table{min-width:560px}
+  /* 空状态的提示文字不该被横向滚动切掉：这时候表格没有真实列宽需求，放开最小宽度 */
+  .tablewrap:has(td.empty) table{min-width:0}
+  main{padding:6px}
 }
 </style>
 </head>
@@ -211,11 +303,12 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
       <button class="ghost" id="libUp">上一级</button>
       <label class="inline">前 <input id="limitN" type="number" min="0" placeholder="0" title="只处理前 N 部，0 或留空为不限"> 部（0 不限）</label>
       <button class="primary" id="enqueueSel">加入队列</button>
+      <button class="ghost" id="cleanFromLib" title="清理当前目录的字幕和任务记录">清理</button>
       <span class="hint" id="libInfo" style="flex-basis:100%"></span>
     </div>
     <div class="crumb" id="crumb"></div>
     <div class="tablewrap"><table>
-      <colgroup><col style="width:44px"><col><col style="width:90px"><col style="width:90px"><col style="width:90px"><col style="width:90px"></colgroup>
+      <colgroup><col style="width:34px"><col style="width:42%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
       <thead><tr><th><input type="checkbox" id="checkAll" title="全选"></th><th>目录</th><th>视频</th><th>已完成</th><th>未处理</th><th>队列中</th></tr></thead>
       <tbody id="libRows"></tbody>
     </table></div>
@@ -245,8 +338,8 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
       <input id="search" placeholder="按路径搜索" style="flex:1;min-width:140px">
     </div>
     <div class="tablewrap"><table>
-      <colgroup><col style="width:38%"><col style="width:10%"><col style="width:14%"><col style="width:28%"><col style="width:10%"></colgroup>
-      <thead><tr><th>视频</th><th>状态</th><th>阶段 / 进度</th><th>消息</th><th>操作</th></tr></thead>
+      <colgroup><col style="width:24%"><col style="width:8%"><col style="width:14%"><col><col style="width:120px"></colgroup>
+      <thead><tr><th>视频</th><th>状态</th><th>阶段 / 进度</th><th>消息</th><th class="act">操作</th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
     <div class="pager">
@@ -258,22 +351,29 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
   </section>
 
   <section id="setView" class="pane" hidden>
-    <h2>设置</h2>
-    <p class="hint">改完点保存即生效，下一次领取任务就按新参数跑。带「只读」的分组是程序自己定的，不用管。</p>
+    <div class="setHead">
+      <div class="setTitle">
+        <h2>设置</h2>
+        <p class="hint">整页只有一个保存入口：改完点右上角「保存」即生效，下一次领取任务就按新参数跑。</p>
+      </div>
+      <div class="setActions">
+        <button class="primary" type="button" id="setSave">保存</button>
+        <button class="ghost" type="button" id="setCancel">取消</button>
+        <button class="ghost" type="button" id="setReset">重置</button>
+      </div>
+    </div>
 
+    <div id="setCards">
     <form id="accountForm">
       <fieldset><div class="fsTitle">登录账号</div>
         <label>用户名<input name="username" autocomplete="username" required maxlength="32"></label>
-        <label>当前口令（改之前验一下）<input name="current_password" type="password" autocomplete="current-password" required></label>
         <label>新口令（留空 = 不换）<input name="password" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
-        <label>再输一次新口令<input name="password2" type="password" autocomplete="new-password" placeholder="和上一栏一致"></label>
         <div class="hint" id="acctHint" style="grid-column:1/-1">正在读取…</div>
       </fieldset>
-      <button class="primary" type="submit">保存</button>
     </form>
 
     <form id="settings">
-      <fieldset><div class="fsTitle">媒体与语言</div>
+      <fieldset class="c211"><div class="fsTitle">媒体与语言</div>
         <label>媒体根目录（容器内路径）<input name="media_root" required></label>
         <label>源语言<input name="source_language" required></label>
         <label>目标语言<input name="target_language" required></label>
@@ -289,128 +389,135 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         <label>断句间隔（秒）<input name="asr_split_gap" type="number" min="0.1" max="3" step="0.1" required><small>说话停顿超过这个长度就断一条。0.7 是正常换气</small></label>
         <label>单条最长秒数<input name="asr_max_cue_seconds" type="number" min="2" max="30" step="0.5" required><small>超了会在最近的句号处断开</small></label>
         <label>单条最多个字<input name="asr_max_cue_chars" type="number" min="10" max="120" required></label>
-        <label class="check"><input name="asr_word_timestamps" type="checkbox">按词对齐时间轴（强烈建议开）</label>
-        <div class="hint" style="grid-column:1/-1">关掉会快约 20 倍，但一条字幕可能横跨好几分钟、和画面对不上——实测 15 句话会被压成 4 条。<b>除非只要个大意，否则别关。</b></div>
-        <label class="check"><input name="keep_japanese_srt" type="checkbox">把日文字幕另存一份到影片旁边（方便校对）</label>
-        <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有的中文字幕（默认不覆盖）</label>
+        <div class="chkRow">
+          <label class="check"><input name="asr_word_timestamps" type="checkbox">按词对齐时间轴（强烈建议开）</label>
+          <label class="check"><input name="keep_japanese_srt" type="checkbox">把日文字幕另存一份到影片旁边</label>
+          <label class="check"><input name="overwrite_existing" type="checkbox">允许覆盖已有的中文字幕</label>
+        </div>
         <div class="hint" id="devLine" style="grid-column:1/-1">正在读取…</div>
       </fieldset>
 
-      <fieldset><div class="fsTitle">翻译渠道</div>
-        <label>用哪个渠道<select name="translate_provider" id="provider">
-          <option value="openai">OpenAI 兼容接口（大模型，译文最像人话）</option>
-          <option value="google">谷歌翻译（免费，不用密钥）</option>
-          <option value="bing">必应翻译（免费，不用密钥）</option>
-          <option value="deepl">DeepL 官方 API（要 key）</option>
-        </select></label>
-        <label>每批几条字幕一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 40；条数对不上会自动拆小重发</small></label>
-        <label>备用渠道（主渠道挂了自动切过去）<input name="translate_fallback" placeholder="例如 google,bing；留空 = 不启用"><small>主渠道 key 失效、额度用光或端点不通时自动换，任务不会停在原地等人</small></label>
-        <label>每天最多翻多少字（0 = 不限）<input name="daily_char_budget" type="number" min="0" required></label>
-        <label class="check"><input name="tm_enabled" type="checkbox">记住翻过的台词（重复台词不再花钱）</label>
-
-        <div class="pgroup" data-provider="openai">
-          <label>接口地址<input name="openai_base_url" placeholder="https://xxx/v1"></label>
-          <label>模型名<input name="openai_model" placeholder="gpt-4o-mini"></label>
-          <label>API 密钥（留空 / 显示 ******** 表示保持原样）<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="直接粘贴，带不带 Bearer 前缀都行"></label>
-          <div class="hint">译文最自然；额度、限流、费用都由你填的那个站决定。</div>
+      <fieldset><div class="fsTitle">翻译（渠道顺序 + 节奏）</div>
+        <div class="chList">
+          <div class="chSlot" data-slot="0">
+            <div class="chRow">
+              <span class="chIdx">1</span>
+              <select class="chPick" data-slot="0" name="translate_provider">
+                <option value="deepl">DeepL 官方 API（要 key）</option>
+                <option value="openai">OpenAI 兼容接口（大模型，最像人话）</option>
+                <option value="bing">必应翻译（免费，不用密钥）</option>
+                <option value="google">谷歌翻译（免费，不用密钥）</option>
+              </select>
+              <button type="button" class="ghost chTest" data-slot="0">测试</button>
+            </div>
+            <div class="chOut" data-slot="0"></div>
+            <div class="chCfg" data-slot="0"></div>
+          </div>
+          <div class="chSlot" data-slot="1">
+            <div class="chRow">
+              <span class="chIdx">2</span>
+              <select class="chPick" data-slot="1">
+                <option value="">不用（空档）</option>
+                <option value="openai">OpenAI 兼容接口（大模型，最像人话）</option>
+                <option value="deepl">DeepL 官方 API（要 key）</option>
+                <option value="bing">必应翻译（免费，不用密钥）</option>
+                <option value="google">谷歌翻译（免费，不用密钥）</option>
+              </select>
+              <button type="button" class="ghost chTest" data-slot="1">测试</button>
+            </div>
+            <div class="chOut" data-slot="1"></div>
+            <div class="chCfg" data-slot="1"></div>
+          </div>
+          <div class="chSlot" data-slot="2">
+            <div class="chRow">
+              <span class="chIdx">3</span>
+              <select class="chPick" data-slot="2">
+                <option value="">不用（空档）</option>
+                <option value="bing">必应翻译（免费，不用密钥）</option>
+                <option value="google">谷歌翻译（免费，不用密钥）</option>
+              </select>
+              <button type="button" class="ghost chTest" data-slot="2">测试</button>
+            </div>
+            <div class="chOut" data-slot="2"></div>
+            <div class="chCfg" data-slot="2"></div>
+          </div>
         </div>
-
-        <div class="pgroup" data-provider="google">
-          <label>谷歌 API key（留空用内置的，失效会自动续）<input name="google_api_key" type="password" autocomplete="new-password"></label>
-          <div class="hint">免费渠道，一个密钥都不用也能跑。一次提交一组句子、原样返回一组译文，不会串行错位。</div>
+        <input type="hidden" name="translate_fallback">
+        <div class="bar" style="margin:2px 0 0;grid-column:1/-1">
+          <button type="button" class="ghost" id="testChain">按顺序全测一遍</button>
+          <span class="hint" id="testChainOut" style="flex:1 1 320px">依次真发一句，第一个成功就停。</span>
         </div>
+        <div class="hint" style="grid-column:1/-1">某一档报 key 无效 / 额度用光 / 连不上就自动换下一档。同一渠道排两档会自动去重。</div>
 
-        <div class="pgroup" data-provider="bing">
-          <div class="hint">免费渠道，不需要任何密钥，国内网络能直连。机翻质量中等，胜在零成本。</div>
-        </div>
+        <div id="cfgBank" hidden>
+          <div class="pgroup" data-provider="openai">
+            <label>接口地址<input name="openai_base_url" placeholder="https://xxx/v1"></label>
+            <label>模型名<input name="openai_model" placeholder="gpt-4o-mini"></label>
+            <label style="grid-column:1/-1">API 密钥（留空 / 显示 ******** 表示保持原样）<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="直接粘贴，带不带 Bearer 前缀都行"></label>
+            <div class="hint">额度、限流、费用由你填的那个站决定。</div>
+          </div>
 
-        <div class="pgroup" data-provider="deepl">
-          <label>DeepL API key（免费版的以 :fx 结尾）<input name="deepl_api_key" type="password" autocomplete="new-password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"></label>
-          <label>接口地址（留空自动判断免费版/付费版）<input name="deepl_api_url" placeholder="https://api-free.deepl.com/v2/translate"></label>
-          <div class="hint">免费档每月 50 万字符，注册地址 deepl.com/pro-api。key 带 :fx 自动走免费端点。</div>
-        </div>
+          <div class="pgroup" data-provider="deepl">
+            <label>DeepL API key（免费版的以 :fx 结尾）<input name="deepl_api_key" type="text" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"></label>
+            <label>接口地址（留空自动判断免费版/付费版）<input name="deepl_api_url" placeholder="https://api-free.deepl.com/v2/translate"></label>
+            <div class="hint">免费档每月 50 万字符；key 带 :fx 走免费端点。</div>
+          </div>
 
-        <div class="bar" style="margin:10px 0 0;grid-column:1/-1">
-          <button type="button" class="ghost" id="testTr">测试当前渠道</button>
-          <span class="hint" id="testTrOut" style="flex:1 1 320px">点一下会真发一句日文过去，把译文或上游的原话显示出来。</span>
+          <div class="pgroup" data-provider="google">
+            <label style="grid-column:1/-1">谷歌 API key（留空用内置的，失效会自动续）<input name="google_api_key" type="password" autocomplete="new-password"></label>
+            <div class="hint">留空用内置 key，失效自动续。</div>
+          </div>
+
+          <div class="pgroup" data-provider="bing">
+            <div class="hint">免密钥，国内直连；质量中等，适合兜底。</div>
+          </div>
         </div>
+        <div class="subTitle">节奏与成本</div>
+        <div class="trRow">
+          <label>每批几条一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 40，条数对不上自动拆小重发</small></label>
+          <label>每天最多翻多少字（0 = 不限）<input name="daily_char_budget" type="number" min="0" required></label>
+          <label class="check"><input name="tm_enabled" type="checkbox">记住翻过的台词，重复不再花钱</label>
+        </div>
+        <div class="hint" style="grid-column:1/-1">限流、429 冷却、重试次数由程序按渠道自己掌握。</div>
       </fieldset>
 
-      <fieldset><div class="fsTitle">刮削字幕（先找现成的，找不到再转写）</div>
-        <label class="check"><input name="scrape_enabled" type="checkbox">开启刮削</label>
+
+      <fieldset class="scrapeGrid"><div class="fsTitle">刮削字幕（必走 SubtitleCat，先找现成的）</div>
         <label>优先要哪种
           <select name="scrape_prefer">
             <option value="zh">现成中文字幕（直接用，最省事）</option>
             <option value="ja">日文原字幕（拿到后本地翻译，质量更可控）</option>
           </select>
         </label>
-        <label style="grid-column:1/-1">平台顺序（逗号分隔，从左到右逐个搜，第一个对上的就停）
-          <input name="scrape_providers" placeholder="subtitlecat,kitsunekko">
-          <small>可选：<b>subtitlecat</b>（这类影片实测 8/8 有中文）、kitsunekko（动漫）、subdl、opensubtitles（后两个要 key）。留空 = subtitlecat,kitsunekko。</small>
+        <label>两次刮削间隔（秒）<input name="scrape_min_interval" type="number" min="0" max="600" step="1" required><small>别调太小，会被站点封 IP</small></label>
+        <label>每小时最多刮几部（0 = 不限）
+          <span class="hrsRow">
+            <input name="scrape_hourly_limit" type="number" min="0" max="500" required>
+            <button type="button" class="ghost" id="scrapeTest">测试刮削</button>
+          </span>
+          <small>超了先转写，一小时后恢复</small>
         </label>
-        <label>SubDL API key（可选）<input name="subdl_api_key" type="password" autocomplete="new-password" placeholder="subdl.com 注册后拿"><small>它只有主流影视，这类片搜不到，不填也行</small></label>
-        <label>OpenSubtitles API key（可选）<input name="opensubtitles_api_key" type="password" autocomplete="new-password" placeholder="opensubtitles.com 注册后拿"><small>同上，注册要邮箱验证；不填就跳过这一站</small></label>
-        <div class="hint" style="grid-column:1/-1">
-          每个任务会先按上面的顺序问一遍字幕站：找到<b>中文</b>字幕直接写成 <span class="mono">.zh-CN.srt</span> 收工；
-          找到<b>日文</b>字幕就跳过最贵的转写，直接进翻译；全都找不到才回到「抽音频 → 转写 → 翻译」。
-          匹配只认番号一致或标题高度重合，再拿片长核一道，宁可没字幕也不给你配错。
-          刮到的字幕会剔掉字幕站塞的广告行和署名行。
+        <div class="hint" id="scrapeOut"></div>
+        <div class="scrapeFoot">
+          <div class="hint">先刮削：命中中文直接用；命中日文只翻译；都没命中才转写。</div>
+          <div class="hint" id="scrapeList">正在读取状态…</div>
         </div>
-        <div class="bar" style="margin:10px 0 0;grid-column:1/-1">
-          <button type="button" class="ghost" id="scrapeTest">测试刮削</button>
-          <span class="hint" id="scrapeOut" style="flex:1 1 320px">点一下会拿库里第一个视频真去搜，把每个平台的结果原样列出来。</span>
-        </div>
-        <div class="hint" id="scrapeList" style="grid-column:1/-1">正在读取平台状态…</div>
       </fieldset>
-
-      <fieldset><div class="fsTitle">运行节奏（只读，程序自己定）</div>
-        <div class="perf" id="perfGrid">正在读取…</div>
-        <div class="hint" style="grid-column:1/-1">这些值是为了保证不打爆中转站、也不把 CPU 吃满而定的，不用你调。</div>
-      </fieldset>
-
-      <button class="primary" type="submit">保存</button>
     </form>
 
     <form id="aiform">
-      <fieldset><div class="fsTitle">AI 接入（给内网其它 Agent 用）</div>
-        <label style="grid-column:1/-1">对外访问地址（填容器外能访问到的地址）<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
-        <label class="check" style="grid-column:1/-1"><input name="api_token_readonly" type="checkbox">这个 token 只读（只能查，不能暂停/重试/入队）</label>
-        <label style="grid-column:1/-1">接入 token
+      <fieldset class="aiGrid"><div class="fsTitle">AI 接入（给内网其它 Agent 用）</div>
+        <label>对外访问地址<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
+        <label>接入 token
           <div class="tokenbox">
             <input id="tokenValue" readonly>
             <button type="button" class="ghost mini" id="copyToken">复制</button>
             <button type="button" class="ghost mini" id="rotateToken">重新生成</button>
           </div>
         </label>
-        <div class="hint" style="grid-column:1/-1">token 只存在服务端数据库里，不进代码仓库、不进 .env。请求头写 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 就能读状态、看日志、暂停队列、重试任务。</div>
-      </fieldset>
-      <button class="primary" type="submit">保存</button>
-    </form>
-
-    <form id="cleanForm">
-      <fieldset><div class="fsTitle">清理与重置</div>
-        <label style="grid-column:1/-1">作用范围
-          <div class="tokenbox">
-            <input id="cleanScope" placeholder="默认整个媒体根目录，可以填某个子目录的完整路径">
-            <button type="button" class="ghost mini" id="cleanUseLib">用当前浏览的目录</button>
-          </div>
-          <small>留空 = 整个媒体根目录。<b>原视频永远不会被删</b>，这里只删索引记录、任务记录和 .srt 字幕。</small>
-        </label>
-        <div class="cleanGrid">
-          <label class="check"><input type="checkbox" name="item" value="jobs" checked>任务记录<span class="cdesc">队列里的排队/完成/失败记录和它们的日志</span></label>
-          <label class="check"><input type="checkbox" name="item" value="index">媒体索引<span class="cdesc">扫描出来的文件清单，删了重新扫描就回来</span></label>
-          <label class="check"><input type="checkbox" name="item" value="subtitles">已生成的字幕<span class="cdesc">只删 <span class="mono">.ja.srt</span> 和 <span class="mono">.zh-CN.srt</span></span></label>
-          <label class="check"><input type="checkbox" name="item" value="work">临时工作文件<span class="cdesc">半成品日文字幕</span></label>
-          <label class="check"><input type="checkbox" name="item" value="audio">抽出来的音频<span class="cdesc">占空间最大的一块</span></label>
-          <label class="check"><input type="checkbox" name="item" value="tm">翻译记忆<span class="cdesc">翻过的台词缓存，清了下次要重新花钱</span></label>
-        </div>
-        <div class="bar" style="margin:12px 0 0;grid-column:1/-1">
-          <button type="button" class="ghost" id="cleanPreview">先看看会删什么</button>
-          <button type="button" class="danger" id="cleanRun" disabled>确认删除</button>
-          <span class="hint" id="cleanOut" style="flex:1 1 340px">点「先看看」会列出每一项的数量和占用空间，不会动手。</span>
-        </div>
       </fieldset>
     </form>
+    </div>
 
     <h3 style="font-size:14px;margin:18px 0 8px">接口清单</h3>
     <pre class="help" id="aiHelp">加载中…</pre>
@@ -418,7 +525,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
 
   <section id="logView" class="pane" hidden>
     <h2>日志</h2>
-    <p class="hint">任务进度、阶段切换、失败原因都记在这里，最新的在最下面。停在这个页面时每 4 秒自动刷新。</p>
+    <p class="hint">任务进度、阶段切换、失败原因都记在这里，最新的在最上面。停在这个页面时每 4 秒自动刷新。</p>
     <div class="bar">
       <select id="logLevel">
         <option value="">全部级别</option>
@@ -426,7 +533,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         <option value="warn">警告</option>
         <option value="error">错误</option>
       </select>
-      <label class="inline"><input type="checkbox" id="logFollow" checked> 自动滚到最新</label>
+      <label class="inline"><input type="checkbox" id="logFollow" checked> 保持最新在顶端</label>
       <button class="ghost" id="logRefresh">刷新</button>
       <span class="hint" id="logInfo" style="flex-basis:100%"></span>
     </div>
@@ -438,6 +545,34 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
   </section>
 
   <dialog id="dlg"><h3 style="margin-top:0">任务记录</h3><pre id="log"></pre><button class="ghost" id="close">关闭</button></dialog>
+
+  <!-- 清理：属于「库与任务」的功能，从两个面板的「清理…」按钮打开，不再放在设置页 -->
+  <dialog id="cleanDlg">
+    <h3 style="margin:0 0 4px">清理</h3>
+    <p class="hint" style="margin:0 0 12px">先勾要删的东西，点「看看会删什么」核对数量，再点「确认删除」。<b>原视频永远不会被删。</b></p>
+    <div class="cleanBody">
+      <label>作用范围<span class="mono" id="cleanScopeHint"></span>
+        <div class="tokenbox">
+          <input id="cleanScope" placeholder="留空 = 整个媒体根目录，也可以填某个子目录的完整路径">
+          <button type="button" class="ghost mini" id="cleanUseLib">用当前浏览的目录</button>
+        </div>
+      </label>
+      <div class="cleanGrid">
+        <label class="check"><input type="checkbox" name="item" value="jobs" checked>任务记录<span class="cdesc">队列里的排队/完成/失败记录和它们的日志</span></label>
+        <label class="check"><input type="checkbox" name="item" value="index">媒体索引<span class="cdesc">扫描出来的文件清单，删了重新扫描就回来</span></label>
+        <label class="check"><input type="checkbox" name="item" value="subtitles">已生成的字幕<span class="cdesc">只删 <span class="mono">.ja.srt</span> 和 <span class="mono">.zh-CN.srt</span></span></label>
+        <label class="check"><input type="checkbox" name="item" value="work">临时工作文件<span class="cdesc">半成品日文字幕</span></label>
+        <label class="check"><input type="checkbox" name="item" value="audio">抽出来的音频<span class="cdesc">占空间最大的一块</span></label>
+        <label class="check"><input type="checkbox" name="item" value="tm">翻译记忆<span class="cdesc">翻过的台词缓存，清了下次要重新花钱</span></label>
+      </div>
+      <div class="hint" id="cleanOut">点「看看会删什么」会列出每一项的数量和占用空间，不会动手。</div>
+    </div>
+    <div class="dlgActions">
+      <button type="button" class="ghost" id="cleanCancel">关闭</button>
+      <button type="button" class="ghost" id="cleanPreview">看看会删什么</button>
+      <button type="button" class="danger" id="cleanRun" disabled>确认删除</button>
+    </div>
+  </dialog>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -504,18 +639,18 @@ async function refreshStats() {
       ['转写速度', ratio, s.asr_ratio ? '' : 'soft'],
       ['剩余估算', eta, s.eta_seconds ? '' : 'soft'],
       ['今日字数', s.chars_today, ''],
-      ['近 1 分钟请求', lm.sent_last_minute ?? 0, '']
+      ['近 1 分请求', lm.sent_last_minute ?? 0, '']
     ];
     if (lm.cooldown_remaining > 0) stats.push(['限流冷却', lm.cooldown_remaining + ' 秒', 'warm']);
     if (s.paused) stats.push(['队列状态', '已暂停', 'warm']);
     $('tags').innerHTML = stats.map(([k, v, cls]) =>
-      `<div class="stat ${cls}"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
+      `<div class="stat ${cls}" title="${esc(k)}：${esc(v)}"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
     $('toggle').textContent = s.paused ? '恢复队列' : '暂停队列';
     $('toggle').dataset.paused = s.paused ? '1' : '0';
     // 翻译接口刚报过错就在状态栏那条横框里挂一格，别让任务表停在 70% 让人干等
     if (lm.last_error && (lm.last_error_age < 0 || lm.last_error_age < 600)) {
       $('tags').insertAdjacentHTML('beforeend',
-        `<div class="stat alert" title="${esc(lm.last_error)}"><b>翻译接口报错</b><span>${esc(lm.last_error.slice(0, 40))}</span></div>`);
+        `<div class="stat alert" title="${esc(lm.last_error)}"><b>接口报错</b><span>${esc(lm.last_error.slice(0, 40))}</span></div>`);
     }
     return s;
   } catch (e) { toast('统计读取失败：' + e.message, 'err'); }
@@ -542,7 +677,7 @@ async function refreshJobs() {
         <td><span class="badge ${statusClass(j.status)}">${statusText(j.status)}</span></td>
         <td>${stageText(j.stage)} ${pct}%<div class="prog"><i style="width:${pct}%"></i></div></td>
         <td class="msg"><span class="ellip" title="${esc(msg)}">${esc(msg)}</span></td>
-        <td>
+        <td class="act">
           <button class="ghost mini" onclick="showLog(${j.id})">记录</button>
           ${j.status === 'failed' ? `<button class="mini" onclick="retry(${j.id})">重试</button>` : ''}
         </td></tr>`;
@@ -598,7 +733,8 @@ function enterDir(path) { loadLibrary(path); }
 async function showLog(id) {
   try {
     const rows = await api(`/api/jobs/${id}/events`);
-    $('log').textContent = rows.map(r => `${r.created_at} [${r.level}] ${r.message}`).join('\n') || '无记录';
+    // 跟日志页一致：新的在上
+    $('log').textContent = rows.slice().reverse().map(r => `${fmtTime(r.created_at)} [${r.level}] ${r.message}`).join('\n') || '无记录';
     $('dlg').showModal();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -614,27 +750,9 @@ async function loadSettings() {
     if (!el) continue;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   }
-  syncProviderGroups();
+  applySavedChannels();
   loadDevice();
-  loadPerf();
   loadScrapeStatus();
-}
-
-// 只读的性能/并发展示：这些参数不给用户改，只让用户知道现在是什么档位
-async function loadPerf() {
-  const box = $('perfGrid');
-  try {
-    const [d, s] = await Promise.all([api('/api/device'), api('/api/settings')]);
-    const items = [
-      ['转写线程', d.cpu_threads + (d.cpu_count ? ' / ' + d.cpu_count + ' 核' : '')],
-      ['抽音频并发', s.extract_workers], ['转写并发', s.asr_workers], ['翻译并发', s.translate_workers],
-      ['beam size', s.beam_size], ['批推理', s.asr_batch_size > 1 ? s.asr_batch_size + ' 条' : '关闭'],
-      ['请求间隔', s.translate_min_interval + ' 秒'], ['每分钟上限', s.translate_rpm ? s.translate_rpm + ' 次' : '不限'],
-      ['429 冷却', s.translate_429_backoff + ' 秒'], ['单阶段重试', s.max_attempts + ' 次'],
-    ];
-    box.innerHTML = items.map(([k, v]) =>
-      `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join('');
-  } catch (e) { box.textContent = '读取失败：' + e.message; }
 }
 
 async function loadDevice() {
@@ -655,11 +773,11 @@ async function loadAccount() {
   try {
     const a = await api('/api/account');
     $('accountForm').elements.namedItem('username').value = a.username || 'admin';
+    savedUsername = a.username || 'admin';
     if (!a.editable) {
       hint.textContent = '⛔ ' + a.locked_reason;
       hint.style.color = 'var(--warn)';
       for (const el of $('accountForm').elements) if (el.name) el.disabled = true;
-      $('accountForm').querySelector('button[type="submit"]').disabled = true;
     } else {
       const from = {env: '当前口令来自环境变量', file: '当前口令存在 data/account.json',
                     legacy: '已从旧版 admin-password.txt 迁移过来', new: '本次运行自动生成的初始口令',
@@ -673,7 +791,6 @@ async function loadAccount() {
 async function loadAi() {
   const data = await api('/api/settings');
   $('aiform').elements.namedItem('web_public_url').value = data.web_public_url || '';
-  $('aiform').elements.namedItem('api_token_readonly').checked = !!data.api_token_readonly;
   $('tokenValue').value = data.api_token || '';
   const help = await api('/api/ai/help');
   $('aiHelp').textContent = help.auth + '\n\n' + help.endpoints.map(e =>
@@ -814,27 +931,30 @@ $('rotateToken').onclick = async () => {
     toast('新 token 已生成，旧 token 立即失效');
   } catch (e) { toast(e.message, 'err'); }
 };
-$('aiform').onsubmit = async e => {
-  e.preventDefault();
-  const f = e.target.elements;
-  try {
-    await api('/api/settings', 'PUT', {
-      web_public_url: f.namedItem('web_public_url').value,
-      api_token_readonly: f.namedItem('api_token_readonly').checked
-    });
-    toast('接入设置已保存');
-  } catch (err) { toast('保存失败：' + err.message, 'err'); }
-};
 $('close').onclick = () => $('dlg').close();
 
-// ---------------------------------------------------------------- 清理与重置
+// ---------------------------------------------------------------- 清理（在「库与任务」里）
 // 两步走：先预览拿到每一项的数量，用户看过再点「确认删除」。
 // 没预览过时删除按钮是禁用的，避免手滑把跑了一半的任务清空。
 let cleanReady = null;
 
 function cleanItems() {
-  return [...document.querySelectorAll('#cleanForm input[name="item"]:checked')].map(el => el.value);
+  return [...document.querySelectorAll('#cleanDlg input[name="item"]:checked')].map(el => el.value);
 }
+
+// 入口：媒体库「清理」默认填当前浏览的目录（任务面板不再单独放按钮）
+function openClean() {
+  cleanReady = null;
+  $('cleanRun').disabled = true;
+  $('cleanOut').textContent = '点「看看会删什么」会列出每一项的数量和占用空间，不会动手。';
+  $('cleanScope').value = state.libPath || '';
+  $('cleanScopeHint').textContent = state.libPath
+    ? '（已填成你在媒体库里打开的那个目录）' : '（留空 = 整个媒体库）';
+  $('cleanDlg').showModal();
+}
+
+$('cleanFromLib').onclick = () => openClean();
+$('cleanCancel').onclick = () => $('cleanDlg').close();
 
 function fmtBytes(n) {
   if (!n) return '0 B';
@@ -860,7 +980,7 @@ function describeClean(r) {
 
 $('cleanUseLib').onclick = () => {
   $('cleanScope').value = state.libPath || '';
-  if (!state.libPath) toast('还没在媒体库里选过目录，先到「库与任务」点一个目录', 'info');
+  if (!state.libPath) toast('还没在媒体库里选过目录，先点一个目录', 'info');
   cleanReady = null;
   $('cleanRun').disabled = true;
 };
@@ -906,23 +1026,96 @@ $('cleanRun').onclick = async () => {
 const CLEAN_LABEL = {jobs: '任务记录', index: '媒体索引', subtitles: '字幕',
                      work: '临时文件', audio: '音频', tm: '翻译记忆'};
 
-$('settings').onsubmit = async e => {
-  e.preventDefault();
+// ---------------------------------------------------------------- 设置页全局保存
+// 整页只有一个保存入口（标题右侧的 保存 / 取消 / 重置）。
+// 保存 = 设置表单 + AI 接入 + 登录账号一起提交；账号密码只在真的要改时才发。
+// 表单上没有 submit 按钮，这里挂上拦截：否则在输入框里按回车会整页重载。
+let savedUsername = '';
+
+function collectForm(id) {
   const data = {};
-  for (const el of e.target.elements) {
-    if (!el.name) continue;
-    data[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+  for (const el of $(id).elements) {
+    if (!el.name || el.disabled) continue;
+    data[el.name] = el.type === 'checkbox' ? el.checked
+      : el.type === 'number' ? Number(el.value) : el.value;
   }
-  const btn = e.target.querySelector('button[type="submit"]');
+  return data;
+}
+
+async function saveAll() {
+  const af = $('accountForm').elements;
+  const user = af.namedItem('username').value.trim();
+  const pwd = af.namedItem('password').value;
+
+  if (pwd && pwd.length < 8) { toast('新口令至少 8 位', 'err'); return; }
+  const accountChanged = !!pwd || (savedUsername && user && user !== savedUsername);
+
+  const data = Object.assign({}, collectForm('settings'), collectForm('aiform'));
+  const btn = $('setSave');
   try {
     await withBusy(btn, '保存中…', () => api('/api/settings', 'PUT', data));
-    toast('设置已保存，下一次领取任务即生效');
-    syncProviderGroups(); refreshStats(); loadDevice();
+    let note = '设置已保存，下一次领取任务即生效';
+    if (accountChanged) {
+      const r = await api('/api/account', 'POST', { username: user, password: pwd });
+      af.namedItem('password').value = '';
+      savedUsername = r.username;
+      note = pwd ? `设置已保存，账号口令已更新（下次登录用「${r.username}」）`
+                 : `设置已保存，用户名已改为「${r.username}」`;
+      loadAccount();
+    }
+    toast(note);
+    renderChannels(); refreshStats(); loadDevice(); loadScrapeStatus();
   } catch (err) { toast('保存失败：' + err.message, 'err'); }
-};
+}
+
+// 取消 = 丢掉没保存的改动，回到服务端当前值
+async function cancelAll() {
+  $('accountForm').elements.namedItem('password').value = '';
+  try {
+    await Promise.all([loadSettings(), loadAccount(), loadAi()]);
+    toast('已取消未保存的修改');
+  } catch (e) { toast('取消失败：' + e.message, 'err'); }
+}
+
+// 重置 = 把这一页填成程序默认值；不落库，点「保存」才生效。
+// 密钥类字段跳过，避免顺手把已经填好的 key 清空。
+const RESET_SKIP = /(^|_)(api_key|token)$/;
+async function resetAll() {
+  if (!confirm('把这一页填成程序默认值？\n\n只改表单，点「保存」才生效。\n已填的 API 密钥会保留，不会被清空。')) return;
+  try {
+    const d = await api('/api/settings/defaults');
+    for (const [k, v] of Object.entries(d)) {
+      if (RESET_SKIP.test(k)) continue;
+      const el = $('settings').elements.namedItem(k);
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    }
+    applySavedChannels(); loadDevice();
+    toast('已填入默认值，点「保存」生效', 'info');
+  } catch (e) { toast('重置失败：' + e.message, 'err'); }
+}
+
+$('setSave').onclick = saveAll;
+$('setCancel').onclick = cancelAll;
+$('setReset').onclick = resetAll;
+// 页面上没有 submit 按钮了，回车一律当「保存」，不让浏览器重载整页
+for (const id of ['accountForm', 'settings', 'aiform']) {
+  $(id).addEventListener('submit', e => { e.preventDefault(); saveAll(); });
+}
 
 // ---------------------------------------------------------------- 日志页
 const LEVEL_TEXT = {info: '一般', warn: '警告', error: '错误'};
+
+// 时间统一按北京时间（UTC+8）显示，项目写死，不看浏览器和容器时区
+function fmtTime(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  // 老数据可能是 "2026-11-15T11:41:57+00:00"，新数据带 +08:00，无时区按北京时间算
+  const iso = /([zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : raw.replace(' ', 'T') + '+08:00';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return raw.replace('T', ' ').slice(0, 19);
+  return new Date(d.getTime() + 8 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+}
 
 async function loadLogs() {
   const level = $('logLevel').value;
@@ -932,105 +1125,175 @@ async function loadLogs() {
     const rows = await api('/api/logs?' + params);
     const body = $('logRows');
     const seen = new Set([...body.querySelectorAll('tr')].map(tr => tr.dataset.id));
+    // 后端已按 id 倒序（最新在前），这里不再翻转
     body.innerHTML = rows.map(r => `<tr data-id="${r.id}" class="${seen.has(String(r.id)) ? '' : 'new'}">
-        <td class="t">${esc(String(r.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+        <td class="t">${esc(fmtTime(r.created_at))}</td>
         <td><span class="lvl ${esc(r.level || 'info')}">${esc(LEVEL_TEXT[r.level] || r.level || '一般')}</span></td>
         <td>${esc(r.message || '')}${r.job_id ? `<span class="hint"> — 任务 #${r.job_id}</span>` : ''}</td>
       </tr>`).join('') || '<tr><td class="empty" colspan="3">还没有日志。跑一次索引或入队就会有。</td></tr>';
     $('logInfo').textContent = `共 ${rows.length} 条` + (level ? `（只显示「${LEVEL_TEXT[level]}」）` : '');
     if ($('logFollow').checked) {
       const wrap = body.closest('.tablewrap');
-      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+      if (wrap) wrap.scrollTop = 0;  // 最新在顶端，跟到顶部
     }
   } catch (e) { toast('日志读取失败：' + e.message, 'err'); }
 }
 $('logLevel').onchange = loadLogs;
 $('logRefresh').onclick = loadLogs;
 
-// ---------------------------------------------------------------- 账号保存
-$('accountForm').onsubmit = async e => {
-  e.preventDefault();
-  const f = e.target.elements;
-  const pwd = f.namedItem('password').value;
-  const pwd2 = f.namedItem('password2').value;
-  if (pwd !== pwd2) { toast('两次输入的新口令不一致', 'err'); return; }
-  if (pwd && pwd.length < 8) { toast('新口令至少 8 位', 'err'); return; }
-  const btn = e.target.querySelector('button[type="submit"]');
-  try {
-    const r = await withBusy(btn, '保存中…', () => api('/api/account', 'POST', {
-      username: f.namedItem('username').value,
-      current_password: f.namedItem('current_password').value,
-      password: pwd,
-    }));
-    f.namedItem('current_password').value = '';
-    f.namedItem('password').value = '';
-    f.namedItem('password2').value = '';
-    toast(pwd ? `账号口令已更新，下次登录用「${r.username}」` : `用户名已改为「${r.username}」`);
-    loadAccount();
-  } catch (err) { toast('保存失败：' + err.message, 'err'); }
-};
+// ---------------------------------------------------------------- 翻译渠道（三档顺序）
+const CH_LABELS = {deepl: 'DeepL', openai: 'OpenAI', google: '谷歌翻译', bing: '必应翻译'};
 
-function syncProviderGroups() {
-  const cur = $('provider').value;
-  for (const g of document.querySelectorAll('.pgroup')) g.hidden = g.dataset.provider !== cur;
+function chPicks() { return [...document.querySelectorAll('.chPick')]; }
+
+// 三档里选中的渠道 → translate_provider（第 1 档）+ translate_fallback（后两档）
+function syncChannelOrder() {
+  const order = [];
+  for (const sel of chPicks()) if (sel.value && !order.includes(sel.value)) order.push(sel.value);
+  const hidden = $('settings').elements.namedItem('translate_fallback');
+  if (hidden) hidden.value = order.slice(1).join(',');
 }
-$('provider').onchange = syncProviderGroups;
+
+// 按三档的选择，把对应渠道的配置块搬到它自己那一档里。
+// 配置块是整块搬（不是复制），所以框里没保存的值不会丢。
+function renderChannels() {
+  const bank = $('cfgBank');
+  for (const cfg of document.querySelectorAll('.chCfg')) {
+    for (const child of [...cfg.children]) if (child.classList.contains('pgroup')) bank.appendChild(child);
+    cfg.replaceChildren();
+  }
+  const seen = new Map();
+  chPicks().forEach((sel, i) => {
+    const cfg = sel.closest('.chSlot').querySelector('.chCfg');
+    const p = sel.value;
+    if (!p) { cfg.innerHTML = '<div class="hint">这一档不用，翻译时直接跳过。</div>'; return; }
+    if (seen.has(p)) {
+      cfg.innerHTML = `<div class="hint">「${CH_LABELS[p]}」的配置在第 ${seen.get(p) + 1} 档，共用同一套，改一处就够。</div>`;
+      return;
+    }
+    seen.set(p, i);
+    const node = bank.querySelector(`.pgroup[data-provider="${p}"]`);
+    if (node) cfg.appendChild(node);
+  });
+  syncChannelOrder();
+}
+
+// 服务端存的顺序（主渠道 + 备用渠道）还原成三档下拉
+function applySavedChannels() {
+  const els = $('settings').elements;
+  const primary = els.namedItem('translate_provider');
+  const raw = (els.namedItem('translate_fallback') || {}).value || '';
+  const order = [primary ? primary.value : 'deepl',
+                 ...raw.split(',').map(s => s.trim()).filter(Boolean)];
+  chPicks().forEach((sel, i) => { if (i > 0) sel.value = order[i] || ''; });
+  renderChannels();
+}
+
+for (const sel of chPicks()) sel.addEventListener('change', renderChannels);
+
+// 测一档：发的是**这个下拉里选的渠道** + **表单里现在填的配置**，
+// 不是上次保存进库的那套（否则选了 openai 却回 deepl 的结果）。
+async function testChannel(i, quiet) {
+  const picks = chPicks();
+  const sel = picks[i];
+  const slot = sel.closest('.chSlot');
+  const out = slot.querySelector('.chOut');
+  const btn = slot.querySelector('.chTest');
+  const provider = sel.value;
+  if (!provider) {
+    out.style.color = 'var(--muted)';
+    out.textContent = '这一档没选渠道。';
+    return {ok: false, provider: '', skipped: true};
+  }
+  const els = $('settings').elements;
+  const val = n => (els.namedItem(n) || {}).value || '';
+  const body = {
+    provider,
+    openai_base_url: val('openai_base_url'), openai_model: val('openai_model'),
+    openai_api_key: val('openai_api_key'), google_api_key: val('google_api_key'),
+    deepl_api_key: val('deepl_api_key'), deepl_api_url: val('deepl_api_url'),
+  };
+  out.style.color = 'var(--muted)';
+  out.textContent = `正在请求 ${CH_LABELS[provider]}…`;
+  let r;
+  try {
+    r = await withBusy(btn, '测试中…', () => api('/api/translate/test', 'POST', body));
+  } catch (e) {
+    out.style.color = 'var(--bad)';
+    out.textContent = `测试请求没发出去：${e.message}`;
+    return {ok: false, provider};
+  }
+  const extra = [];
+  if (r.key) extra.push(r.key);
+  if (r.usage && r.usage.ok) extra.push(`当月已用 ${r.usage.used} / ${r.usage.limit} 字符`);
+  else if (r.usage && r.usage.detail) extra.push(`额度查询：${r.usage.detail}`);
+  out.style.color = r.ok ? 'var(--ok)' : 'var(--bad)';
+  out.innerHTML = esc(r.ok
+      ? `${CH_LABELS[provider]} 正常（${r.seconds} 秒）：${r.source} → ${r.target}`
+      : `${CH_LABELS[provider]} 失败：${r.error}`)
+    + (extra.length ? '<br><small>' + esc(extra.join('；')) + '</small>' : '');
+  if (!quiet) toast(r.ok ? `${CH_LABELS[provider]} 可用` : `${CH_LABELS[provider]} 不可用`, r.ok ? 'ok' : 'err');
+  return r;
+}
+
+for (const btn of document.querySelectorAll('.chTest')) {
+  btn.onclick = () => testChannel(Number(btn.dataset.slot));
+}
+
+$('testChain').onclick = async () => {
+  const out = $('testChainOut');
+  out.style.color = 'var(--muted)';
+  out.textContent = '按顺序测试中…';
+  for (let i = 0; i < chPicks().length; i++) {
+    if (!chPicks()[i].value) continue;
+    out.textContent = `正在测第 ${i + 1} 档 ${CH_LABELS[chPicks()[i].value]}…`;
+    const r = await testChannel(i, true);
+    if (r.ok) {
+      out.style.color = 'var(--ok)';
+      out.textContent = `第 ${i + 1} 档「${CH_LABELS[r.provider]}」能用 —— 真跑翻译时也会先走它。`;
+      return;
+    }
+  }
+  out.style.color = 'var(--bad)';
+  out.textContent = '三档都不可用，翻译会直接报错停住。';
+};
 
 // ---------------------------------------------------------------- 刮削
 async function loadScrapeStatus() {
   const box = $('scrapeList');
   try {
     const r = await api('/api/scrape/status');
-    box.innerHTML = (r.providers || []).map(p => {
-      const state = !p.enabled ? '未排进顺序'
-        : p.ready ? '可用' : p.reason;
-      const mark = p.enabled && p.ready ? '✓' : '·';
-      return `<span style="margin-right:14px"><span class="mono">${mark}</span> `
-        + `<b>${esc(p.label)}</b> — ${esc(state)}`
-        + `<span class="hint">（${esc(p.note)}）</span></span>`;
-    }).join('') || '没有可用平台';
+    const cat = (r.providers || []).find(p => p.name === 'subtitlecat') || {};
+    const state = cat.ready ? '可用' : (cat.reason || '不可用');
+    const gate = r.gate || {};
+    const used = gate.used_last_hour || 0;
+    const since = gate.seconds_since_last;
+    const sinceTxt = since === null || since === undefined ? '还没刮过'
+      : `距上次 ${Math.round(since)} 秒`;
+    box.innerHTML = `<span class="mono">${cat.ready ? '✓' : '·'}</span> `
+      + `<b>SubtitleCat</b> — ${esc(state)} · 间隔 ${esc(r.interval)} 秒 · `
+      + `近1小时 ${used}${r.hourly_limit ? '/' + esc(r.hourly_limit) : ''} 部 · ${esc(sinceTxt)}`;
   } catch (e) { box.textContent = '读取失败：' + e.message; }
 }
 
 $('scrapeTest').onclick = async () => {
   const out = $('scrapeOut');
-  out.textContent = '正在逐个平台搜索，可能要十几秒…';
+  out.textContent = '正在 SubtitleCat 搜索，可能要十几秒…';
   try {
     const r = await withBusy($('scrapeTest'), '搜索中…', () => api('/api/scrape/test', 'POST', {}));
-    const head = r.ok
-      ? `命中：${r.provider} · ${r.language === 'zh' ? '中文' : '日文'} · ${r.cues} 条 · 《${r.source}》`
-      : '五个平台都没有对得上的，这个片子会走转写';
-    out.innerHTML = `<b>${esc(head)}</b><br>` +
-      (r.tried || []).map(line => esc(line)).join('<br>');
-    toast(r.ok ? '刮削命中' : '刮削没找到，将走转写', r.ok ? 'ok' : 'info');
+    if (r.ok) {
+      const head = `命中：${r.provider} · ${r.language === 'zh' ? '中文' : '日文'} · ${r.cues} 条 · 《${r.source}》`;
+      out.innerHTML = `<b>${esc(head)}</b><br>` + (r.tried || []).map(l => esc(l)).join('<br>');
+      toast('刮削命中', 'ok');
+    } else {
+      // 没命中时优先显示原因（比如「刚刮过，还要等 15 秒」），别让人以为站点挂了
+      const why = (r.notes && r.notes.length) ? r.notes.join('；') : 'SubtitleCat 没有对得上的字幕';
+      out.innerHTML = `<b>${esc(why)}</b><br>` + (r.tried || []).map(l => esc(l)).join('<br>');
+      toast('刮削没找到，将走转写', 'info');
+    }
+    loadScrapeStatus();
   } catch (e) {
     out.textContent = '测试失败：' + e.message;
-  }
-};
-
-$('testTr').onclick = async () => {
-  const out = $('testTrOut');
-  out.textContent = '正在请求上游…';
-  out.style.color = 'var(--muted)';
-  try {
-    const r = await api('/api/translate/test', 'POST', {});
-    // DeepL 403 时把「key 的形状」和「当月额度」一起显示出来，
-    // 否则用户只能看到一句 Forbidden，根本无从下手
-    const extra = [];
-    if (r.key) extra.push(r.key);
-    if (r.usage && r.usage.ok) extra.push(`当月已用 ${r.usage.used} / ${r.usage.limit} 字符`);
-    else if (r.usage && r.usage.detail) extra.push(`额度查询：${r.usage.detail}`);
-    const tail = extra.length ? '<br><small>' + esc(extra.join('；')) + '</small>' : '';
-    if (r.ok) {
-      out.style.color = 'var(--ok)';
-      out.innerHTML = esc(`${r.provider} 正常（${r.seconds} 秒）：${r.source} → ${r.target}`) + tail;
-    } else {
-      out.style.color = 'var(--bad)';
-      out.innerHTML = esc(`${r.provider} 失败：${r.error}`) + tail;
-    }
-  } catch (e) {
-    out.style.color = 'var(--bad)';
-    out.textContent = '测试请求失败：' + e.message;
   }
 };
 

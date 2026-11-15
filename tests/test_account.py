@@ -78,6 +78,14 @@ class ChangeCredentialTests(AccountBase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(main.web_credentials()[1], "brand-new-pass-9")
 
+    def test_change_password_without_old_password(self):
+        # 页面上只留「用户名 + 新口令」两栏，不带旧口令也能改
+        self.login()
+        r = self.client.post("/api/account", json={
+            "username": self.user, "password": "no-old-needed-1"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(main.web_credentials()[1], "no-old-needed-1")
+
     def test_change_username_only_keeps_password(self):
         self.login()
         r = self.client.post("/api/account", json={

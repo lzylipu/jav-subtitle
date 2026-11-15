@@ -148,6 +148,7 @@ class BuildTranslatorTests(unittest.TestCase):
     def test_no_fallback_returns_single_engine(self):
         s = Settings()
         s.translate_provider = "google"
+        s.translate_fallback = ""          # 默认值是 "openai,bing"，这里要显式清空
         self.assertNotIsInstance(build_translator("google", s), ChainTranslator)
 
     def test_fallback_builds_chain(self):

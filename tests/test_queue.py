@@ -65,6 +65,19 @@ class QueueTests(unittest.TestCase):
                                capture_output=True, text=True).stdout.strip()
         self.assertEqual(probe, "16000,1")
 
+    def test_broken_video_says_why_instead_of_ffmpeg_dump(self):
+        """坏文件／假视频要给中文原因，不许把 ffmpeg 命令行 + returncode 183 抛给用户"""
+        if not shutil.which("ffmpeg"):
+            self.skipTest("本机没有 ffmpeg")
+        fake = self.tmp / "broken.mp4"
+        fake.write_bytes(b"\0" * (2 * 1024 * 1024))
+        with self.assertRaises(ValueError) as ctx:
+            asr.extract_audio(fake, self.tmp / "broken.wav")
+        msg = str(ctx.exception)
+        self.assertIn("视频解码失败", msg)
+        self.assertNotIn("CalledProcessError", msg)
+        self.assertNotIn("-hide_banner", msg)
+
     def test_stability_gate_survives_rescan(self):
         """回归：多次扫描不能刷新 updated_at，否则稳定闸门永远不通过。"""
         env_reset_settings = Settings(media_root=str(self.tmp), min_file_age=1, target_language="zh-CN")

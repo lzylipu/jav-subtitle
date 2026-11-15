@@ -347,7 +347,9 @@ class ConfigReadyTests(unittest.TestCase):
     def _settings(self, **kw):
         from app.config import Settings
         base = dict(openai_base_url="https://x/v1", openai_api_key="", openai_model="m",
-                    deepl_api_key="", google_api_key="")
+                    deepl_api_key="", google_api_key="",
+                    # 默认备用渠道是 "openai,bing"，这里清空，单渠道行为才测得准
+                    translate_fallback="")
         base.update(kw)
         return Settings(**base)
 
@@ -355,6 +357,17 @@ class ConfigReadyTests(unittest.TestCase):
         from app import pipeline
         self.assertTrue(pipeline.config_ready(self._settings(translate_provider="google")))
         self.assertTrue(pipeline.config_ready(self._settings(translate_provider="bing")))
+
+    def test_default_fallback_keeps_queue_alive(self):
+        # 默认顺序 deepl → openai → bing：deepl 没配 key 也不该把队列判成「没配置好」，
+        # 因为链最末端是免密钥的必应
+        from app import pipeline
+        from app.config import Settings
+        fresh = Settings()
+        fresh.translate_provider = "deepl"
+        fresh.deepl_api_key = ""
+        fresh.openai_api_key = ""
+        self.assertTrue(pipeline.config_ready(fresh))
 
     def test_deepl_needs_key(self):
         from app import pipeline
@@ -370,12 +383,14 @@ class ConfigReadyTests(unittest.TestCase):
 
 
 class SecretNeverLeaksTests(unittest.TestCase):
-    def test_safe_dict_masks_all_three_keys(self):
+    def test_safe_dict_masks_keys_except_deepl(self):
+        """openai / google 掩码；DeepL 明文（页面要能一眼核对 :fx 抄全没）"""
         from app.config import Settings
-        s = Settings(openai_api_key="a", google_api_key="b", deepl_api_key="c")
+        s = Settings(openai_api_key="a", google_api_key="b", deepl_api_key="c:fx")
         out = s.safe_dict()
-        for field in ("openai_api_key", "google_api_key", "deepl_api_key"):
+        for field in ("openai_api_key", "google_api_key"):
             self.assertEqual(out[field], "********")
+        self.assertEqual(out["deepl_api_key"], "c:fx")
 
 
 if __name__ == "__main__":

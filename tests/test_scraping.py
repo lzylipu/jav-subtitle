@@ -225,10 +225,13 @@ class OrderTests(unittest.TestCase):
         self.assertEqual(result.provider, "subtitlecat")
         self.assertEqual(calls, ["subtitlecat"])
 
-    def test_disabled_returns_not_ok(self):
+    def test_always_on_even_with_legacy_off_flag(self):
+        """界面已不给关：老库里 scrape_enabled=False 也要照刮"""
         settings = type("S", (), {"scrape_enabled": False, "scrape_providers": "",
                                  "scrape_prefer": "zh"})()
-        self.assertFalse(scraping.scrape("x.mp4", settings).ok)
+        result = scraping.scrape("x.mp4", settings)
+        self.assertFalse(result.ok)
+        self.assertNotIn("未启用刮削", result.notes)
 
 
 class DecodeTests(unittest.TestCase):

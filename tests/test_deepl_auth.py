@@ -11,7 +11,7 @@ import unittest
 
 import env  # noqa: F401  —— 必须先 import，设置临时 DATA_DIR
 
-from app.translation import DeepLTranslator, FatalTranslationError
+from app.translation import DeepLTranslator, FatalTranslationError, TranslationError
 
 
 class DeepLKeyReportTests(unittest.TestCase):
@@ -47,13 +47,22 @@ class DeepLKeyReportTests(unittest.TestCase):
 
 
 class DeepL403MessageTests(unittest.TestCase):
-    """用假 key 打真端点：403 一定发生，正好验证报错文案。"""
+    """用假 key 打真端点：403 一定发生，正好验证报错文案。
+
+    这条要真连外网。网络抖一下（SSL EOF / 超时）不该算代码坏了，
+    所以连不上就跳过 —— 但一旦连上，403 文案必须完全对。
+    """
 
     def test_403_message_says_it_is_not_about_batch_size(self):
         t = DeepLTranslator("dummy-key-invalid:fx", timeout=30, retries=1,
                             rpm=0, min_interval=0)
-        with self.assertRaises(FatalTranslationError) as ctx:
-            t.translate_texts(["こんにちは"])
+        try:
+            with self.assertRaises(FatalTranslationError) as ctx:
+                t.translate_texts(["こんにちは"])
+        except TranslationError as exc:            # 网络层错，不是 403
+            self.skipTest(f"连不上 DeepL，跳过这条真网络断言：{exc}")
+        finally:
+            pass
         text = str(ctx.exception)
         self.assertIn("403", text)
         self.assertIn("自查", text)

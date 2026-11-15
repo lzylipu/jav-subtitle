@@ -6,11 +6,13 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 from .config import DB_PATH, Settings
+
+BEIJING = timezone(timedelta(hours=8))  # 项目写死北京时间，跟容器 TZ 无关
 
 _LOCK = threading.RLock()
 
@@ -78,11 +80,12 @@ CREATE TABLE IF NOT EXISTS counters (
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # 固定北京时间（UTC+8），不依赖容器 TZ / 宿主机时区；日志和任务时间都按这个走
+    return datetime.now(BEIJING).isoformat(timespec="seconds")
 
 
 def today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(BEIJING).strftime("%Y-%m-%d")
 
 
 @contextmanager

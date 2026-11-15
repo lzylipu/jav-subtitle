@@ -111,7 +111,10 @@ class SessionTokenTests(unittest.TestCase):
 
     def test_tampered_signature_rejected(self):
         expires, sig = main.make_session().split(".", 1)
-        self.assertFalse(main.verify_session(expires + "." + sig[:-2] + "00"))
+        # 逐位翻转第一个字符，保证改动一定发生（原来把末两位替换成 "00"，
+        # 签名本来就以 "00" 结尾时测试会假失败）
+        head = "1" if sig[0] != "1" else "2"
+        self.assertFalse(main.verify_session(expires + "." + head + sig[1:]))
 
 
 if __name__ == "__main__":

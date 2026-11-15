@@ -77,8 +77,9 @@ class BrandingTests(unittest.TestCase):
         self.assertIn(".fsTitle{grid-column:1/-1", html)
 
     def test_all_save_buttons_are_named_save(self):
+        # v3.10：整页只剩标题右侧那一个保存入口，各分组不再单独挂保存按钮
         html = self._login().get("/").text
-        self.assertIn('<button class="primary" type="submit">保存</button>', html)
+        self.assertIn('<button class="primary" type="button" id="setSave">保存</button>', html)
         for old in ("保存设置", "保存账号口令", "保存接入设置"):
             self.assertNotIn(old, html)
 

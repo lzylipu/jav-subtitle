@@ -147,7 +147,8 @@ def handle_extract(job: dict, settings: Settings) -> None:
 
     # 先问一遍字幕站：有人做过就不用转写了。
     # 124 分钟的片子转写要二三十分钟纯 CPU 时间，能省则省。
-    if settings.scrape_enabled and scrape_video(job, settings, video, target, japanese):
+    # 刮削是必经步骤，不再看开关（界面已不给关）。
+    if scrape_video(job, settings, video, target, japanese):
         return
 
     audio = AUDIO_DIR / f"{job['id']}.wav"

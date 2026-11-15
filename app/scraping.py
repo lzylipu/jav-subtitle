@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import io
 import re
+import threading
+import time
 import unicodedata
 import urllib.parse
 import zipfile
@@ -54,6 +56,9 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 PROVIDERS = ("subtitlecat", "kitsunekko", "subdl", "opensubtitles")
+# 实测只有这家：这类影片 8/8 有中文、8/8 能下，免注册免 key。
+# 其余三家留着代码只为历史记录，接口层面不再启用（老配置里写了也不会被请求）。
+ACTIVE_PROVIDERS = ("subtitlecat",)
 PROVIDER_LABELS = {
     "subtitlecat": "SubtitleCat",
     "kitsunekko": "Kitsunekko",
@@ -643,28 +648,93 @@ def parse_order(raw: str) -> list[str]:
     return order
 
 
+def active_order(raw: str) -> list[str]:
+    """真正会用的平台顺序。只认 SubtitleCat —— 其余站点实测不可用（见 README 平台表），
+    老配置里还写着 kitsunekko 也不会再去请求它，免得白白被拒一次。"""
+    return [p for p in parse_order(raw) if p in ACTIVE_PROVIDERS] or default_order()
+
+
 def default_order() -> list[str]:
-    return [p for p in PROVIDERS if not PROVIDER_CLASSES[p].needs_key]
+    """内置顺序只有 SubtitleCat：其余站点实测要么只覆盖动漫、要么要 key 且 0/8 命中。"""
+    return ["subtitlecat"]
 
 
 # --------------------------------------------------------------------- runner
 
-def scrape(video_name: str, settings: Any, duration: float = 0.0) -> ScrapeResult:
-    """按设置的顺序逐个平台找字幕。第一个对上的就返回，后面的不再请求。"""
-    result = ScrapeResult()
-    if not getattr(settings, "scrape_enabled", False):
-        result.notes.append("未启用刮削")
-        return result
+# 刮削闸门：SubtitleCat 免费、免登录，但连着刷会封 IP。
+# 规则两条：两次之间至少隔 N 秒；每小时最多 N 部。进程内共享，多 worker 也一起算。
+class _Gate:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last = 0.0
+        self._stamps: list[float] = []
 
-    order = parse_order(getattr(settings, "scrape_providers", "")) or default_order()
+    def check(self, interval: float, hourly_limit: int) -> tuple[bool, float, str]:
+        """→ (能不能刮, 还要等几秒, 不能刮的原因)"""
+        now = time.time()
+        with self._lock:
+            self._stamps = [t for t in self._stamps if now - t < 3600]
+            if hourly_limit and len(self._stamps) >= hourly_limit:
+                return False, 0.0, (f"最近一小时已刮削 {len(self._stamps)} 部，"
+                                    f"达到上限 {hourly_limit} 部")
+            wait = max(0.0, float(interval or 0) - (now - self._last))
+        return True, wait, ""
+
+    def mark(self) -> None:
+        now = time.time()
+        with self._lock:
+            self._last = now
+            self._stamps = [t for t in self._stamps if now - t < 3600]
+            self._stamps.append(now)
+
+    def snapshot(self) -> dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            recent = [t for t in self._stamps if now - t < 3600]
+            return {"used_last_hour": len(recent),
+                    "seconds_since_last": round(now - self._last, 1) if self._last else None}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._last = 0.0
+            self._stamps = []
+
+
+GATE = _Gate()
+
+
+def scrape(video_name: str, settings: Any, duration: float = 0.0,
+           wait: bool = True) -> ScrapeResult:
+    """按设置的顺序逐个平台找字幕。第一个对上的就返回，后面的不再请求。
+
+    wait=True 时如果离上一次刮削不到间隔，就先睡够再发（流水线里用）；
+    wait=False 时直接把「还要等几秒」写进 notes 返回，给「测试刮削」按钮用，
+    免得点一下卡二十秒。
+    """
+    result = ScrapeResult()
+    # 刮削是必经步骤，不再看 scrape_enabled 开关（界面已不给关，老配置也不拦）
+    order = active_order(getattr(settings, "scrape_providers", ""))
     if not order:
         result.notes.append("没有可用的平台")
         return result
+
+    interval = float(getattr(settings, "scrape_min_interval", 20.0) or 0)
+    hourly = int(getattr(settings, "scrape_hourly_limit", 40) or 0)
+    ok, wait_seconds, why_not = GATE.check(interval, hourly)
+    if not ok:
+        result.notes.append(f"{why_not}，先不刮，直接转写")
+        return result
+    if wait_seconds > 0:
+        if not wait:
+            result.notes.append(f"刚刮过，还要等 {int(wait_seconds) + 1} 秒才能再刮")
+            return result
+        time.sleep(wait_seconds)
 
     query = build_query(video_name, duration)
     prefer = getattr(settings, "scrape_prefer", "zh")
 
     for name in order:
+        GATE.mark()
         provider = PROVIDER_CLASSES[name](settings)
         ok, why = provider.available()
         if not ok:
@@ -729,7 +799,7 @@ def scrape(video_name: str, settings: Any, duration: float = 0.0) -> ScrapeResul
 def provider_status(settings: Any) -> list[dict[str, Any]]:
     """给设置页显示：每个平台能不能用、为什么。"""
     out = []
-    order = parse_order(getattr(settings, "scrape_providers", "")) or default_order()
+    order = active_order(getattr(settings, "scrape_providers", ""))
     for name in PROVIDERS:
         provider = PROVIDER_CLASSES[name](settings)
         ok, why = provider.available()
