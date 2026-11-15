@@ -191,7 +191,7 @@ def handle_asr(job: dict, settings: Settings) -> None:
     if not settings.keep_audio:
         audio.unlink(missing_ok=True)
 
-    advance(job["id"], "translate", 70, f"转写完成 {len(cues)} 条（{elapsed:.0f}s）",
+    advance(job["id"], "translate", 70, f"转写完成 {len(cues)} 条（{elapsed:.0f} 秒）",
             ja_srt=str(working), char_count=sum(len(c.text) for c in cues),
             detected_language=language, asr_seconds=elapsed)
 

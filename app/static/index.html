@@ -451,7 +451,7 @@ async function refreshStats() {
       ['转写速度', ratio, s.asr_ratio ? '' : 'soft'],
       ['剩余估算', eta, s.eta_seconds ? '' : 'soft'],
       ['今日字数', s.chars_today, ''],
-      ['近1分钟请求', lm.sent_last_minute ?? 0, '']
+      ['近 1 分钟请求', lm.sent_last_minute ?? 0, '']
     ];
     if (lm.cooldown_remaining > 0) stats.push(['限流冷却', lm.cooldown_remaining + ' 秒', 'warm']);
     $('tags').innerHTML = stats.map(([k, v, cls]) =>
@@ -853,7 +853,7 @@ $('testTr').onclick = async () => {
     const r = await api('/api/translate/test', 'POST', {});
     if (r.ok) {
       out.style.color = 'var(--ok)';
-      out.textContent = `${r.provider} 正常（${r.seconds}s）：${r.source} → ${r.target}`;
+      out.textContent = `${r.provider} 正常（${r.seconds} 秒）：${r.source} → ${r.target}`;
     } else {
       out.style.color = 'var(--bad)';
       out.textContent = `${r.provider} 失败：${r.error}`;
