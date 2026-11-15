@@ -50,6 +50,10 @@ class Settings:
     google_api_key: str = ""      # 留空用内置公开 key，失效会自动去谷歌前端抓新的
     deepl_api_key: str = ""       # 免费版以 :fx 结尾
     deepl_api_url: str = ""       # 留空按 key 后缀自动选 free / pro 端点
+    # 备用渠道（逗号分隔，例如 "google,bing"）。主渠道 key 失效 / 额度用光 /
+    # 端点不通时自动切过去，任务照跑，不必等人来改设置。
+    # 只对「整库都跑不动」的错误切换；偶发网络错和限流仍由各渠道自己重试。
+    translate_fallback: str = ""
     # 实测（同一批 120 条真实字幕，走中转站）：40 条一批 2.6 秒/条，
     # 20 条一批 5.8 秒/条 —— 上游每次请求本身就要几十秒，批越小越亏。
     # 万一某一批模型数不清条数，引擎自己会拆成两小批重发，不用靠小批次兜底。
@@ -120,6 +124,7 @@ def settings_from_env() -> Settings:
         "GOOGLE_API_KEY": "google_api_key",
         "DEEPL_API_KEY": "deepl_api_key",
         "DEEPL_API_URL": "deepl_api_url",
+        "TRANSLATE_FALLBACK": "translate_fallback",
         "TRANSLATION_BATCH_SIZE": "translation_batch_size",
         "DAILY_CHAR_BUDGET": "daily_char_budget",
         "TRANSLATE_RPM": "translate_rpm",

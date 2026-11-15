@@ -175,6 +175,18 @@ class BaseTranslator:
     def missing_message(self) -> str:
         return "翻译接口未配置"
 
+    def auth_hint(self) -> str:
+        """401/403 时附加到报错后面的自查信息。子类按需覆盖，不许回显密钥。"""
+        return ""
+
+    def key_report(self) -> str:
+        """描述密钥形状（长度、后缀、打哪个端点），绝不回显密钥本身。"""
+        return ""
+
+    def usage(self) -> dict[str, Any]:
+        """当月用量 / 额度。只有带额度概念的渠道（DeepL）覆盖它。"""
+        return {"ok": False, "detail": "该渠道没有额度查询接口"}
+
     def _request(self, texts: list[str]) -> list[str]:
         raise NotImplementedError
 
@@ -287,8 +299,9 @@ class BaseTranslator:
         if code >= 400:
             text = response.text[:300]
             if code in (401, 403):
+                hint = self.auth_hint()
                 raise FatalTranslationError(
-                    f"翻译接口鉴权失败 HTTP {code}: {text}")
+                    f"翻译接口鉴权失败 HTTP {code}: {text}" + (f"\n自查：{hint}" if hint else ""))
             if code == 456:
                 raise FatalTranslationError(f"DeepL 额度已用完：{text}")
             if "model_not_found" in text or "no available channel" in text.lower():
@@ -532,6 +545,37 @@ class DeepLTranslator(BaseTranslator):
         return ("DeepL 没填密钥：到设置页把 DeepL API key 填上"
                 "（免费版注册地址 deepl.com/pro-api，key 以 :fx 结尾）")
 
+    def key_report(self) -> str:
+        """把 key 的形状描述出来（绝不回显 key 本身）。403 时全靠这个判断。"""
+        key = self.api_key
+        head = f"{len(key)} 位"
+        tail = "以 :fx 结尾（免费版 key 的形状）" if key.endswith(":fx") \
+            else "不以 :fx 结尾（免费版 key 一定带 :fx）"
+        return f"密钥{head}、{tail}，本次请求打到 {self.endpoint}"
+
+    def auth_hint(self) -> str:
+        """403 是「key 本身无效/订阅没生效」，跟字幕条数、字数完全无关。
+
+        实测：把一条 20 字的短句发过去同样 403，所以别去调批大小。
+        """
+        return (self.key_report()
+                + "。DeepL 的 403 只表示 key 无效或 API 订阅未生效，"
+                  "与一次发多少条、多少字无关（单句也是 403）。"
+                  "请到 DeepL 账号「API Keys」页确认：订阅是 API Free、"
+                  "key 是完整复制的（免费版一定以 :fx 结尾）、没有被停用。")
+
+    def usage(self) -> dict[str, Any]:
+        """查当月已用字符 / 上限。key 无效时同样会 403，正好用来区分「没权限」和「没额度」。"""
+        url = self.endpoint.rsplit("/v2/", 1)[0] + "/v2/usage"
+        response = self.client.get(url, headers={
+            "Authorization": "DeepL-Auth-Key " + self.api_key})
+        if response.status_code != 200:
+            return {"ok": False, "status": response.status_code,
+                    "detail": response.text[:200]}
+        data = response.json()
+        return {"ok": True, "used": data.get("character_count"),
+                "limit": data.get("character_limit")}
+
     def _request(self, texts: list[str]) -> list[str]:
         if len(texts) > self.MAX_ITEMS:
             head, tail = texts[:self.MAX_ITEMS], texts[self.MAX_ITEMS:]
@@ -557,11 +601,122 @@ class DeepLTranslator(BaseTranslator):
             raise TranslationError("DeepL 响应格式不是预期的 {translations}") from exc
 
 
-# -------------------------------------------------------------------- factory
+# -------------------------------------------------------------------- 渠道降级
+
+
+def parse_fallback(raw: str | None) -> list[str]:
+    """把 "google,bing" 这种设置解析成渠道名列表，去掉主渠道和重复项。"""
+    out: list[str] = []
+    for piece in (raw or "").replace("，", ",").split(","):
+        name = normalize_provider(piece) if piece.strip() else ""
+        if piece.strip() and piece.strip().lower() in PROVIDERS and name not in out:
+            out.append(name)
+    return out
+
+
+class ChainTranslator:
+    """主渠道挂了自动换备用渠道。
+
+    为什么需要它：DeepL 的 key 一失效，整库 5 个任务全在第一批 403 停摆，
+    得等人来改设置。备用渠道就是为了「机器自己扛过去」。
+
+    切换范围刻意收窄——只对「整库都跑不动」的错切：
+      · 鉴权失败 / key 失效（401、403）
+      · 额度用光（456）
+      · 完全没配置（MissingConfigError）
+    偶发网络错、429 限流、条数不符仍由各渠道自己重试，切来切去只会更乱。
+    """
+
+    def __init__(self, entries: list[tuple[str, Any]], primary: str = ""):
+        self.entries = entries                       # [(渠道名, 引擎)]
+        self.primary = primary or (entries[0][0] if entries else "")
+        self.index = 0
+        self.last_misses: list[str] = []
+        self.switch_notes: list[str] = []            # pipeline 拿去写日志给人看
+        self._announced: set[str] = set()
+
+    # -- 状态 --------------------------------------------------------------
+    @property
+    def name(self) -> str:
+        return self.active_name
+
+    @property
+    def active_name(self) -> str:
+        return self.entries[self.index][0] if self.entries else ""
+
+    @property
+    def active(self) -> Any:
+        return self.entries[self.index][1] if self.entries else None
+
+    @property
+    def degraded(self) -> bool:
+        """当前是不是在用备用渠道跑（主渠道没在干活）。"""
+        return bool(self.entries) and self.index > 0
+
+    def ready(self) -> bool:
+        return bool(self.entries)
+
+    def missing_message(self) -> str:
+        return "没有任何可用的翻译渠道"
+
+    def key_report(self) -> str:
+        engine = self.active
+        return engine.key_report() if engine is not None else ""
+
+    def usage(self) -> dict:
+        engine = self.active
+        return engine.usage() if engine is not None else {"ok": False, "detail": "没有激活的渠道"}
+
+    def close(self) -> None:
+        for _, engine in self.entries:
+            try:
+                engine.close()
+            except Exception:  # noqa: BLE001 - 关连接失败不影响结果
+                pass
+
+    # -- 翻译 --------------------------------------------------------------
+    def translate(self, cues: list[Any]) -> list[str]:
+        if not cues:
+            return []
+        return self.translate_texts([c.text for c in cues])
+
+    def translate_texts(self, texts: list[str]) -> list[str]:
+        if not texts:
+            return []
+        errors: list[str] = []
+        start = self.index
+        for i in range(start, len(self.entries)):
+            name, engine = self.entries[i]
+            try:
+                outputs = engine.translate_texts(texts)
+            except (FatalTranslationError, MissingConfigError) as exc:
+                # 整库都跑不动的错：记下来，换下一个渠道。同一渠道只播报一次，
+                # 免得几百批任务把日志刷满
+                errors.append(f"{name}：{exc}")
+                self.index = i + 1
+                if name not in self._announced:
+                    self._announced.add(name)
+                    nxt = self.entries[i + 1][0] if i + 1 < len(self.entries) else "（没有备用渠道了）"
+                    # 日志只留第一行：自查提示那种长文案留给「测试当前渠道」和任务报错，
+                    # 播报写成一行才不会把日志页刷成一面墙
+                    brief = str(exc).splitlines()[0][:160]
+                    self.switch_notes.append(f"渠道「{PROVIDER_LABELS.get(name, name)}」不可用，"
+                                            f"已自动切到「{PROVIDER_LABELS.get(nxt, nxt)}」：{brief}")
+                continue
+            self.index = i
+            self.last_misses = getattr(engine, "last_misses", []) or []
+            return outputs
+        raise FatalTranslationError(
+            "所有翻译渠道都不可用：" + "；".join(
+                line.splitlines()[0][:120] for line in errors))
 
 
 def build_translator(provider: str, settings: Any, stop_event: Any = None) -> BaseTranslator:
-    """按设置里的渠道造一个引擎。settings 可以是 Settings 对象或 dict。"""
+    """按设置里的渠道造一个引擎。settings 可以是 Settings 对象或 dict。
+
+    配了 translate_fallback 就返回 ChainTranslator：主渠道整库不可用时自动
+    切到备用渠道，任务不再停在第一批等人改设置。
+    """
     def get(name: str, default: Any = "") -> Any:
         if isinstance(settings, dict):
             return settings.get(name, default)
@@ -579,17 +734,27 @@ def build_translator(provider: str, settings: Any, stop_event: Any = None) -> Ba
     source = str(get("source_language", "ja") or "ja")
     target = str(get("target_language", "zh-CN") or "zh-CN")
 
-    if name == "google":
-        return GoogleTranslator(source, target,
-                                api_key=str(get("google_api_key", "") or ""), **common)
-    if name == "bing":
-        return BingTranslator(source, target, **common)
-    if name == "deepl":
-        return DeepLTranslator(str(get("deepl_api_key", "") or ""), source, target,
-                               api_url=str(get("deepl_api_url", "") or ""), **common)
-    return OpenAITranslator(str(get("openai_base_url", "") or ""),
-                            str(get("openai_api_key", "") or ""),
-                            str(get("openai_model", "") or ""), **common)
+    def make(which: str) -> BaseTranslator:
+        if which == "google":
+            return GoogleTranslator(source, target,
+                                    api_key=str(get("google_api_key", "") or ""), **common)
+        if which == "bing":
+            return BingTranslator(source, target, **common)
+        if which == "deepl":
+            return DeepLTranslator(str(get("deepl_api_key", "") or ""), source, target,
+                                   api_url=str(get("deepl_api_url", "") or ""), **common)
+        return OpenAITranslator(str(get("openai_base_url", "") or ""),
+                                str(get("openai_api_key", "") or ""),
+                                str(get("openai_model", "") or ""), **common)
+
+    primary = make(name)
+    backups = [p for p in parse_fallback(str(get("translate_fallback", "") or "")) if p != name]
+    if not backups:
+        return primary
+    entries: list[tuple[str, Any]] = [(name, primary)]
+    for backup in backups:
+        entries.append((backup, make(backup)))
+    return ChainTranslator(entries, primary=name)  # type: ignore[return-value]
 
 
 def translator_cache_key(provider: str, settings: Any) -> tuple:
@@ -601,13 +766,9 @@ def translator_cache_key(provider: str, settings: Any) -> tuple:
 
     name = normalize_provider(provider)
     base = (name, get("source_language"), get("target_language"),
-            get("translate_timeout"), get("translate_retries"),
-            get("translate_rpm"), get("translate_min_interval"),
-            get("translate_429_backoff"))
-    if name == "openai":
-        return base + (get("openai_base_url"), get("openai_api_key"), get("openai_model"))
-    if name == "google":
-        return base + (get("google_api_key"),)
-    if name == "deepl":
-        return base + (get("deepl_api_key"), get("deepl_api_url"))
-    return base
+            get("translate_429_backoff"),
+            # 备用渠道变了也要重建，否则新加的备用渠道不会生效
+            get("translate_fallback"))
+    # 降级链可能用到任何一个渠道的凭据，所以全部纳入缓存键
+    return base + (get("openai_base_url"), get("openai_api_key"), get("openai_model"),
+                   get("google_api_key"), get("deepl_api_key"), get("deepl_api_url"))

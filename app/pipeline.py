@@ -21,7 +21,8 @@ from .db import (
 from .ratelimit import limiter
 from .subtitles import Cue, atomic_write, parse_srt, render_srt, target_paths
 from .translation import (FatalTranslationError, MissingConfigError, build_translator,
-                          cache_namespace, normalize_provider, translator_cache_key)
+                          cache_namespace, normalize_provider, parse_fallback,
+                          translator_cache_key)
 
 log = logging.getLogger(__name__)
 
@@ -220,8 +221,9 @@ def handle_translate(job: dict, settings: Settings) -> None:
         finish(job["id"], "done", "skipped", "日文字幕为空")
         return
 
-    # 翻译记忆按渠道分命名空间：机翻结果不能污染大模型缓存
-    model = cache_namespace(settings.translate_provider, settings.openai_model)
+    # 翻译记忆按渠道分命名空间：机翻结果不能污染大模型缓存。
+    # 走降级链时命名空间跟着「实际干活的渠道」走（每批重新算），
+    # 免得主渠道恢复后把备用渠道的机翻结果当成自己的缓存直接返回。
     batch_size = max(1, settings.translation_batch_size)
     engine = translator(settings)
     started = time.time()
@@ -234,6 +236,9 @@ def handle_translate(job: dict, settings: Settings) -> None:
     for start in range(0, total, batch_size):
         chunk = cues[start:start + batch_size]
         texts = [c.text for c in chunk]
+        # 命名空间跟着当前实际干活的渠道走（走降级链时可能是备用渠道）
+        provider_now = getattr(engine, "active_name", None) or settings.translate_provider
+        model = cache_namespace(provider_now, settings.openai_model)
         cached = tm_lookup(texts, model) if settings.tm_enabled else {}
         result: list[str | None] = [None] * len(chunk)
         missing: list[int] = []
@@ -263,6 +268,12 @@ def handle_translate(job: dict, settings: Settings) -> None:
             counter_add(f"chars:{today()}", need)
             last_translate_error["text"] = ""
             counter_add("translate.total_chars", need)
+            # 主渠道不可用、自动切到备用渠道时如实播报一次，
+            # 否则用户只会看到「怎么译文风格变了」而不知道发生了什么
+            notes = getattr(engine, "switch_notes", None)
+            if notes:
+                while notes:
+                    add_event(job["id"], notes.pop(0), "warn")
             for i, value in zip(missing, outputs):
                 result[i] = value
             # 个别句子反复翻不过时引擎会保留日文原文，这里如实记账并写一条日志，
@@ -458,14 +469,20 @@ def config_ready(settings: Settings) -> bool:
     """当前渠道是否具备发请求的条件。
 
     谷歌/必应免密钥，永远算就绪；deepl 要 key；openai 要地址+模型+key。
+    配了备用渠道时，只要链上有一个能用就算就绪——主 key 失效不该
+    把整个队列判成「没配置好」而停在那儿等人工。
     """
-    provider = normalize_provider(settings.translate_provider)
-    if provider in ("google", "bing"):
+    def single(provider: str) -> bool:
+        if provider in ("google", "bing"):
+            return True
+        if provider == "deepl":
+            return bool(settings.deepl_api_key)
+        return bool(settings.openai_base_url and settings.openai_model
+                    and settings.openai_api_key)
+
+    if single(normalize_provider(settings.translate_provider)):
         return True
-    if provider == "deepl":
-        return bool(settings.deepl_api_key)
-    return bool(settings.openai_base_url and settings.openai_model
-                and settings.openai_api_key)
+    return any(single(p) for p in parse_fallback(getattr(settings, "translate_fallback", "")))
 
 
 def device_summary(settings: Settings) -> dict:
@@ -529,6 +546,8 @@ def stats() -> dict:
                                              if last_translate_error["ts"] else -1)},
         "config_ready": config_ready(settings),
         "translate_provider": normalize_provider(settings.translate_provider),
+        # 备用渠道串（空 = 没配降级）。UI 拿它判断要不要提醒「主渠道挂了」
+        "translate_fallback": getattr(settings, "translate_fallback", "") or "",
         # 转写固定 CPU+int8，这里只是实际线程数，方便对照设置
         "asr_device": device_summary(settings),
     }

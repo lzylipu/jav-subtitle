@@ -30,7 +30,7 @@ from .db import (
 )
 from .ratelimit import limiter
 from .translation import (PROVIDER_LABELS, PROVIDERS, build_translator,
-                          clean_secret, normalize_provider)
+                          clean_secret, normalize_provider, parse_fallback)
 from .scanner import library_tree, scan_media
 
 scheduler = BackgroundScheduler()
@@ -39,8 +39,9 @@ security = HTTPBasic(auto_error=False)
 SESSION_COOKIE = "ns_session"
 SESSION_TTL = 30 * 86400          # 登录一次管一个月，家用 NAS 没人想天天登
 STATIC_DIR = Path(__file__).parent / "static"
-# 不需要登录就能访问的路径：登录页本身、登录/退出接口
-ANON_PATHS = ("/login", "/api/login", "/api/logout")
+# 不需要登录就能访问的路径：登录页本身、登录/退出接口、图标（登录页也要显示 logo）
+ANON_PATHS = ("/login", "/api/login", "/api/logout",
+              "/static/logo.png", "/static/favicon.png", "/static/apple-touch-icon.png")
 
 
 class NeedLogin(HTTPException):
@@ -398,6 +399,19 @@ def login_page():
     return FileResponse(STATIC_DIR / "login.html", headers={"Cache-Control": "no-store"})
 
 
+# logo / favicon 是静态图，不走鉴权也要能取（登录页要用），缓存一天
+_ICONS = {"logo.png": "logo.png", "favicon.png": "favicon.png",
+          "apple-touch-icon.png": "apple-touch-icon.png"}
+
+
+@app.get("/static/{name}")
+def static_icon(name: str):
+    if name not in _ICONS:
+        raise HTTPException(404, "没有这个文件")
+    return FileResponse(STATIC_DIR / _ICONS[name],
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.post("/api/login")
 def do_login(body: LoginBody):
     if not check_password(body.username, body.password):
@@ -438,6 +452,7 @@ class SettingsPatch(BaseModel):
     google_api_key: str | None = None
     deepl_api_key: str | None = None
     deepl_api_url: str | None = None
+    translate_fallback: str | None = None
     translation_batch_size: int | None = None
     translate_retries: int | None = None
     daily_char_budget: int | None = None
@@ -502,6 +517,11 @@ def set_settings(patch: SettingsPatch):
             value = clean_secret(value)
         if key == "translate_provider":
             value = normalize_provider(value)
+        if key == "translate_fallback":
+            # 顺手去重、去掉主渠道自己，存成规范的 "google,bing"
+            value = ",".join(p for p in parse_fallback(value)
+                             if p != normalize_provider(patch.translate_provider
+                                                       or data.get("translate_provider", "")))
         data[key] = value
     updated = Settings.from_dict(data)
     save_settings(updated)
@@ -678,15 +698,24 @@ def translate_test(body: TranslateTestBody | None = None):
     text = (body.text or "こんにちは、今日はいい天気ですね。").strip() or "こんにちは"
     started = time.time()
     engine = build_translator(provider, settings)
+    diag: dict = {}
+    # DeepL 的 403 几乎全是 key 本身的问题：把 key 的形状和当月额度一并带回去，
+    # 用户一眼能看出「是没粘全 / 少了 :fx / 订阅没生效 / 额度用光」中的哪一种。
+    if engine.key_report():
+        diag["key"] = engine.key_report()
+        try:
+            diag["usage"] = engine.usage()
+        except Exception as exc:  # noqa: BLE001 - 诊断信息拿不到不影响主结果
+            diag["usage"] = {"ok": False, "detail": str(exc)[:120]}
     try:
         outputs = engine.translate_texts([text])
         return {"ok": True, "provider": provider,
                 "source": text, "target": outputs[0] if outputs else "",
-                "seconds": round(time.time() - started, 2)}
+                "seconds": round(time.time() - started, 2), **diag}
     except Exception as exc:  # noqa: BLE001 - 要把上游原话原样带回界面
         return {"ok": False, "provider": provider, "source": text,
                 "error": f"{type(exc).__name__}: {exc}",
-                "seconds": round(time.time() - started, 2)}
+                "seconds": round(time.time() - started, 2), **diag}
     finally:
         engine.close()
 
@@ -806,4 +835,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.6"}
+    return {"ok": True, "version": "3.7"}

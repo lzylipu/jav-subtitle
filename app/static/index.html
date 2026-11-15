@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>JAV-Subtitle</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
 :root{color-scheme:light;--ink:#1d1d1f;--muted:rgba(60,60,67,.65);--line:rgba(255,255,255,.55);--accent:#4299e1;--accent-ink:#fff;--ok:#34c759;--bad:#ff3b30;--warn:#ff9f0a;--glass:rgba(255,255,255,.46);--fill:rgba(255,255,255,.34);--field:rgba(255,255,255,.62);--stage:#edf2f7;--glow:linear-gradient(140deg,#a0aec0 0%,#cbd5e0 45%,#edf2f7 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.28)}
 :root[data-theme="dark"]{color-scheme:dark;--ink:#f5f5f7;--muted:rgba(235,235,245,.74);--line:rgba(255,255,255,.2);--glass:rgba(22,27,36,.68);--fill:rgba(255,255,255,.06);--field:rgba(0,0,0,.28);--stage:#0b1220;--glow:linear-gradient(140deg,#1a365d 0%,#2a4365 45%,#1a202c 100%);--shadow:0 24px 64px -16px rgba(0,0,0,.6)}
@@ -15,7 +17,7 @@ aside{margin:12px;padding:16px 12px;border-radius:22px;background:var(--glass);b
 .brand{display:flex;gap:10px;align-items:center;margin:0 0 16px}
 .brandbox{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
 .brandbox>div{flex:1;min-width:0}
-.mark{width:36px;height:36px;border-radius:12px;display:block;flex:none}
+.mark{width:40px;height:40px;border-radius:13px;display:block;flex:none;object-fit:cover;box-shadow:0 4px 14px -4px rgba(0,0,0,.3)}
 .brand h1{font-size:16px;margin:0;letter-spacing:.2px}
 .brand p{margin:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .theme{width:36px;height:36px;border-radius:50%;padding:0;display:grid;place-items:center;flex:none}
@@ -85,18 +87,14 @@ button:disabled{opacity:.45;cursor:default}
 input,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:9px 10px;font:inherit;background:var(--field);color:var(--ink);min-width:0}
 input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(66,153,225,.16)}
 input[type=checkbox]{width:16px;height:16px;flex:none;accent-color:var(--accent)}
-#notice{min-height:0;font-size:13px;color:#c93400;margin:0}
-#notice:empty{display:none}
-:root[data-theme="dark"] #notice{color:#ffb340}
 :root[data-theme="dark"] .stats{border-color:rgba(255,255,255,.22)}
 :root[data-theme="dark"] .stat{border-left-color:rgba(255,255,255,.26)}
 :root[data-theme="dark"] .stat b{color:rgba(235,235,245,.8)}
 /* 暗色下输入框和占位符要提亮一档，否则跟卡片底糊在一起看不清 */
 :root[data-theme="dark"] input, :root[data-theme="dark"] select{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.24);color:#fff}
 :root[data-theme="dark"] input::placeholder{color:rgba(235,235,245,.45)}
-:root[data-theme="dark"] legend{color:#fff}
+:root[data-theme="dark"] legend, :root[data-theme="dark"] .fsTitle{color:#fff}
 :root[data-theme="dark"] label{color:rgba(235,235,245,.72)}
-#notice:not(:empty){background:rgba(255,159,10,.14);border:1px solid rgba(255,159,10,.34);border-radius:12px;padding:9px 12px;margin:0}
 #toasts{position:fixed;right:20px;bottom:20px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(400px,calc(100vw - 40px));pointer-events:none}
 .toast{pointer-events:auto;display:flex;gap:9px;align-items:flex-start;background:var(--glass);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:14px;padding:11px 14px;font-size:13px;line-height:1.45;backdrop-filter:blur(24px) saturate(160%);box-shadow:var(--shadow);animation:toastin .18s ease-out;color:var(--ink)}
 .toast.err{border-left-color:var(--bad)}
@@ -129,7 +127,8 @@ td.msg{overflow-wrap:anywhere;color:var(--muted)}
 .pager{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:var(--muted);flex:none}
 form{display:grid;grid-template-columns:1fr;gap:12px;max-width:1000px}
 fieldset{border:1px solid var(--line);border-radius:18px;padding:14px 16px 16px;background:var(--fill);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;margin:0}
-legend{font-size:13px;font-weight:650;color:var(--ink);padding:0 6px}
+/* 分组标题：卡片内的一行标题 + 下面一条贯穿整宽的分隔线（不再骑在边框线上） */
+.fsTitle{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;letter-spacing:.4px;color:var(--ink);padding:0 0 10px;margin:0 0 2px;border-bottom:1px solid var(--line)}
 label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}
 label.check{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:13px}
 .hint{grid-column:1/-1}
@@ -175,15 +174,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
 <aside>
   <div class="brand">
     <div class="brandbox">
-      <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
-        <defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#4299e1"/><stop offset="1" stop-color="#3182ce"/>
-        </linearGradient></defs>
-        <rect width="36" height="36" rx="11" fill="url(#mg)"/>
-        <rect x="7" y="12" width="22" height="3.4" rx="1.7" fill="#fff" opacity=".95"/>
-        <rect x="7" y="19" width="15" height="3.4" rx="1.7" fill="#fff" opacity=".8"/>
-        <rect x="7" y="26" width="9" height="2.6" rx="1.3" fill="#fff" opacity=".55"/>
-      </svg>
+      <img class="mark" src="/static/logo.png" alt="JAV-Subtitle" width="40" height="40">
       <div><h1>JAV-Subtitle</h1><p>日文字幕流水线</p></div>
     </div>
     <button class="theme" id="themeBtn" onclick="toggleTheme()" title="明暗" aria-label="明暗">
@@ -203,7 +194,6 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
 </aside>
 <main>
   <div class="stats" id="tags"></div>
-  <p id="notice" role="status"></p>
   <div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
   <section id="stackView" class="stack">
@@ -266,25 +256,25 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
     <p class="hint">改完点保存即生效，下一次领取任务就按新参数跑。带「只读」的分组是程序自己定的，不用管。</p>
 
     <form id="accountForm">
-      <fieldset><legend>登录账号</legend>
+      <fieldset><div class="fsTitle">登录账号</div>
         <label>用户名<input name="username" autocomplete="username" required maxlength="32"></label>
         <label>当前口令（改之前验一下）<input name="current_password" type="password" autocomplete="current-password" required></label>
         <label>新口令（留空 = 不换）<input name="password" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
         <label>再输一次新口令<input name="password2" type="password" autocomplete="new-password" placeholder="和上一栏一致"></label>
         <div class="hint" id="acctHint" style="grid-column:1/-1">正在读取…</div>
       </fieldset>
-      <button class="primary" type="submit">保存账号口令</button>
+      <button class="primary" type="submit">保存</button>
     </form>
 
     <form id="settings">
-      <fieldset><legend>媒体与语言</legend>
+      <fieldset><div class="fsTitle">媒体与语言</div>
         <label>媒体根目录（容器内路径）<input name="media_root" required></label>
         <label>源语言<input name="source_language" required></label>
         <label>目标语言<input name="target_language" required></label>
         <div class="hint" style="grid-column:1/-1">改根目录只影响扫描范围，不会动硬盘上的文件。</div>
       </fieldset>
 
-      <fieldset><legend>转写（纯 CPU，不用显卡）</legend>
+      <fieldset><div class="fsTitle">转写（纯 CPU，不用显卡）</div>
         <label>模型大小<select name="whisper_model" id="wm">
           <option value="small">small —— 默认，速度和准确率平衡</option>
           <option value="medium">medium —— 更准，慢约 2 倍</option>
@@ -295,7 +285,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         <div class="hint" id="devLine" style="grid-column:1/-1">正在读取…</div>
       </fieldset>
 
-      <fieldset><legend>翻译渠道</legend>
+      <fieldset><div class="fsTitle">翻译渠道</div>
         <label>用哪个渠道<select name="translate_provider" id="provider">
           <option value="openai">OpenAI 兼容接口（大模型，译文最像人话）</option>
           <option value="google">谷歌翻译（免费，不用密钥）</option>
@@ -303,6 +293,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
           <option value="deepl">DeepL 官方 API（要 key）</option>
         </select></label>
         <label>每批几条字幕一起发<input name="translation_batch_size" type="number" min="1" max="200" required><small>默认 40；条数对不上会自动拆小重发</small></label>
+        <label>备用渠道（主渠道挂了自动切过去）<input name="translate_fallback" placeholder="例如 google,bing；留空 = 不启用"><small>主渠道 key 失效、额度用光或端点不通时自动换，任务不会停在原地等人</small></label>
         <label>每天最多翻多少字（0 = 不限）<input name="daily_char_budget" type="number" min="0" required></label>
         <label class="check"><input name="tm_enabled" type="checkbox">记住翻过的台词（重复台词不再花钱）</label>
 
@@ -334,16 +325,16 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         </div>
       </fieldset>
 
-      <fieldset><legend>运行节奏（只读，程序自己定）</legend>
+      <fieldset><div class="fsTitle">运行节奏（只读，程序自己定）</div>
         <div class="perf" id="perfGrid">正在读取…</div>
         <div class="hint" style="grid-column:1/-1">这些值是为了保证不打爆中转站、也不把 CPU 吃满而定的，不用你调。</div>
       </fieldset>
 
-      <button class="primary" type="submit">保存设置</button>
+      <button class="primary" type="submit">保存</button>
     </form>
 
     <form id="aiform">
-      <fieldset><legend>AI 接入（给内网其它 Agent 用）</legend>
+      <fieldset><div class="fsTitle">AI 接入（给内网其它 Agent 用）</div>
         <label style="grid-column:1/-1">对外访问地址（填容器外能访问到的地址）<input name="web_public_url" placeholder="http://192.168.1.10:8000"></label>
         <label class="check" style="grid-column:1/-1"><input name="api_token_readonly" type="checkbox">这个 token 只读（只能查，不能暂停/重试/入队）</label>
         <label style="grid-column:1/-1">接入 token
@@ -355,7 +346,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         </label>
         <div class="hint" style="grid-column:1/-1">token 只存在服务端数据库里，不进代码仓库、不进 .env。请求头写 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 就能读状态、看日志、暂停队列、重试任务。</div>
       </fieldset>
-      <button class="primary" type="submit">保存接入设置</button>
+      <button class="primary" type="submit">保存</button>
     </form>
 
     <h3 style="font-size:14px;margin:18px 0 8px">接口清单</h3>
@@ -388,8 +379,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
 <script>
 const $ = id => document.getElementById(id);
 const state = {page:1, size:50, total:0, libPath:'', libRoot:'', view:'stack'};
-const notice = t => $('notice').textContent = t || '';
-// 操作反馈走 toast：不会被 4 秒一次的 refreshStats 冲掉，成功失败一眼能看清
+// 操作反馈走 toast：不会被 4 秒一次的 refreshStats 冲掉，成功失败一眼能看清，3 秒后自动消失
 function toast(msg, kind = 'ok', ms) {
   const box = $('toasts');
   const el = document.createElement('div');
@@ -397,7 +387,7 @@ function toast(msg, kind = 'ok', ms) {
   const ic = kind === 'ok' ? '✓' : kind === 'err' ? '!' : 'i';
   el.innerHTML = `<span class="ic">${ic}</span><span>${esc(msg)}</span>`;
   box.appendChild(el);
-  const life = ms || (kind === 'err' ? 7000 : 3200);
+  const life = ms || 3000;
   setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; setTimeout(() => el.remove(), 260); }, life);
 }
 // 按钮：执行期间禁用并改文案，结束后恢复，人能看到「点到了」
@@ -454,25 +444,18 @@ async function refreshStats() {
       ['近 1 分钟请求', lm.sent_last_minute ?? 0, '']
     ];
     if (lm.cooldown_remaining > 0) stats.push(['限流冷却', lm.cooldown_remaining + ' 秒', 'warm']);
+    if (s.paused) stats.push(['队列状态', '已暂停', 'warm']);
     $('tags').innerHTML = stats.map(([k, v, cls]) =>
       `<div class="stat ${cls}"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
     $('toggle').textContent = s.paused ? '恢复队列' : '暂停队列';
     $('toggle').dataset.paused = s.paused ? '1' : '0';
-    if (s.blocked) notice(s.blocked);
-    // 翻译接口刚报过错就直说，别让任务表停在 70% 让人干等
-    else if (lm.last_error && (lm.last_error_age < 0 || lm.last_error_age < 600)) {
-      notice(`翻译接口最近一次报错：${lm.last_error}（在「日志」页能看到完整过程）`);
+    // 翻译接口刚报过错就在状态栏那条横框里挂一格，别让任务表停在 70% 让人干等
+    if (lm.last_error && (lm.last_error_age < 0 || lm.last_error_age < 600)) {
+      $('tags').insertAdjacentHTML('beforeend',
+        `<div class="stat alert" title="${esc(lm.last_error)}"><b>翻译接口报错</b><span>${esc(lm.last_error.slice(0, 40))}</span></div>`);
     }
-    else if (!s.config_ready) {
-      const p = s.translate_provider || 'openai';
-      const hint = p === 'deepl'
-        ? 'DeepL 还没填 API key：到「设置」→「翻译渠道」把 key 填上。'
-        : '翻译接口还没配好：到「设置」→「翻译渠道」填接口地址、模型和 API 密钥。';
-      notice(hint);
-    }
-    else if (!$('notice').dataset.keep) notice('');
     return s;
-  } catch (e) { notice('统计失败：' + e.message); }
+  } catch (e) { toast('统计读取失败：' + e.message, 'err'); }
 }
 
 async function refreshJobs() {
@@ -554,7 +537,7 @@ async function showLog(id) {
     const rows = await api(`/api/jobs/${id}/events`);
     $('log').textContent = rows.map(r => `${r.created_at} [${r.level}] ${r.message}`).join('\n') || '无记录';
     $('dlg').showModal();
-  } catch (e) { notice(e.message); }
+  } catch (e) { toast(e.message, 'err'); }
 }
 async function retry(id) {
   try { await api(`/api/jobs/${id}/retry`, 'POST'); toast(`任务 ${id} 已重新排队`); refresh(); }
@@ -855,12 +838,19 @@ $('testTr').onclick = async () => {
   out.style.color = 'var(--muted)';
   try {
     const r = await api('/api/translate/test', 'POST', {});
+    // DeepL 403 时把「key 的形状」和「当月额度」一起显示出来，
+    // 否则用户只能看到一句 Forbidden，根本无从下手
+    const extra = [];
+    if (r.key) extra.push(r.key);
+    if (r.usage && r.usage.ok) extra.push(`当月已用 ${r.usage.used} / ${r.usage.limit} 字符`);
+    else if (r.usage && r.usage.detail) extra.push(`额度查询：${r.usage.detail}`);
+    const tail = extra.length ? '<br><small>' + esc(extra.join('；')) + '</small>' : '';
     if (r.ok) {
       out.style.color = 'var(--ok)';
-      out.textContent = `${r.provider} 正常（${r.seconds} 秒）：${r.source} → ${r.target}`;
+      out.innerHTML = esc(`${r.provider} 正常（${r.seconds} 秒）：${r.source} → ${r.target}`) + tail;
     } else {
       out.style.color = 'var(--bad)';
-      out.textContent = `${r.provider} 失败：${r.error}`;
+      out.innerHTML = esc(`${r.provider} 失败：${r.error}`) + tail;
     }
   } catch (e) {
     out.style.color = 'var(--bad)';
