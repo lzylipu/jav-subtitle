@@ -20,6 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import asr  # noqa: E402
+from app.subtitles import Cue as SrtCue, render_srt  # noqa: E402
+from tools.subtitle_compare import Cue, describe  # noqa: E402
 
 
 def main() -> int:
@@ -33,6 +35,7 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=0, help="只取前 N 秒，0 表示整片")
     ap.add_argument("--stage", default="asr", choices=["asr", "extract", "full"],
                     help="asr=只要转写；extract=只要抽音频；full=抽音频+转写")
+    ap.add_argument("--srt", help="把转写结果写成 SRT（配合 subtitle_compare 对比参考字幕）")
     args = ap.parse_args()
 
     threads = asr.threads_for(args.threads)
@@ -68,6 +71,20 @@ def main() -> int:
     )
     asr_s = time.time() - t0
     print(f"转写：{asr_s:.1f}s  语言={language}  片段={len(segments)}  {media / asr_s:.2f}×实时")
+
+    if segments:
+        stats = describe([Cue(s["start"], s["end"], s["text"]) for s in segments])
+        print(f"时间轴：跨度 {stats['span_s']:.1f}s  占用率 {stats['coverage']:.3f}  "
+              f"单条中位 {stats['median_cue_s']:.2f}s  P95 {stats['p95_cue_s']:.2f}s  "
+              f"最长 {stats['max_cue_s']:.2f}s  >8s {stats['over_8s']} 条  "
+              f"大空档 {stats['gaps_gt_2s']} 处")
+        if args.srt:
+            frames = asr.transcript_to_cues(segments)
+            cues = [SrtCue(i + 1, f["start"], f["end"], f["text"])
+                    for i, f in enumerate(frames)]
+            Path(args.srt).write_text(render_srt(cues), encoding="utf-8")
+            print(f"字幕已写出：{args.srt}")
+            print("  对比参考字幕：python tools/subtitle_compare.py 参考.srt " + args.srt)
 
     if args.stage == "full":
         total = extract_s + asr_s
