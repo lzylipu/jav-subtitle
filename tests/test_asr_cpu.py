@@ -22,8 +22,9 @@ class CpuOnlyTests(unittest.TestCase):
                 created.update(name=name, device=device, compute_type=compute_type,
                                cpu_threads=cpu_threads)
 
-        with mock.patch.object(asr, "WhisperModel", FakeModel), \
-             mock.patch.object(asr, "BatchedInferencePipeline", None):
+        # faster_whisper 是延迟导入的（见 app.asr._load_engine），
+        # 所以这里替换 _load_engine，而不是模块属性 WhisperModel。
+        with mock.patch.object(asr, "_load_engine", return_value=(FakeModel, None)):
             asr.get_model("small", 4)
         self.assertEqual(created["device"], "cpu")
         self.assertEqual(created["compute_type"], "int8")

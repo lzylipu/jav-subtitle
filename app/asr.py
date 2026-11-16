@@ -7,16 +7,24 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
-from faster_whisper import WhisperModel
-
-try:  # faster-whisper >= 1.1
-    from faster_whisper import BatchedInferencePipeline
-except ImportError:  # pragma: no cover
-    BatchedInferencePipeline = None  # type: ignore[assignment]
+# faster_whisper 只在真正要跑模型时才导入。
+# 这样 app.asr 里的纯函数（重切句、trim、去重复）可以被单独测试，
+# 不必先装几百 MB 的模型依赖；CI 和本地跑单测都快很多。
 
 # 每个线程一份模型实例：ctranslate2 内部有线程池，跨线程共享容易互相拖慢
-_CACHE: dict[tuple[int, str, int], tuple[WhisperModel, Any]] = {}
+_CACHE: dict[tuple[int, str, int], tuple[Any, Any]] = {}
 _CACHE_LOCK = threading.Lock()
+
+
+def _load_engine() -> tuple[type, Any]:
+    """延迟导入 faster_whisper。返回 (WhisperModel, BatchedInferencePipeline)。"""
+    from faster_whisper import WhisperModel
+
+    try:  # faster-whisper >= 1.1
+        from faster_whisper import BatchedInferencePipeline
+    except ImportError:  # pragma: no cover
+        BatchedInferencePipeline = None  # type: ignore[assignment]
+    return WhisperModel, BatchedInferencePipeline
 
 # 默认线程数上限。再多收益递减，还会跟翻译/抽音频抢内存带宽。
 MAX_AUTO_THREADS = 4
@@ -75,9 +83,10 @@ def get_model(name: str, cpu_threads: int):
     key = (threading.get_ident(), name, cpu_threads)
     with _CACHE_LOCK:
         if key not in _CACHE:
-            model = WhisperModel(name, device="cpu", compute_type="int8",
-                                 cpu_threads=cpu_threads)
-            batched = BatchedInferencePipeline(model=model) if BatchedInferencePipeline else None
+            whisper_model_cls, batched_cls = _load_engine()
+            model = whisper_model_cls(name, device="cpu", compute_type="int8",
+                                     cpu_threads=cpu_threads)
+            batched = batched_cls(model=model) if batched_cls else None
             _CACHE[key] = (model, batched)
         return _CACHE[key]
 
