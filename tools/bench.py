@@ -33,6 +33,7 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--beam", type=int, default=1)
     ap.add_argument("--seconds", type=float, default=0, help="只取前 N 秒，0 表示整片")
+    ap.add_argument("--start", type=float, default=0, help="从第 N 秒开始截取")
     ap.add_argument("--stage", default="asr", choices=["asr", "extract", "full"],
                     help="asr=只要转写；extract=只要抽音频；full=抽音频+转写")
     ap.add_argument("--srt", help="把转写结果写成 SRT（配合 subtitle_compare 对比参考字幕）")
@@ -47,10 +48,16 @@ def main() -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="bench-"))
     src = video
-    if args.seconds > 0:
+    if args.seconds > 0 or args.start > 0:
         src = tmp / "cut.mp4"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-t", str(args.seconds),
-                        "-c", "copy", str(src)], check=True)
+        cmd = ["ffmpeg", "-v", "error", "-y"]
+        if args.start > 0:
+            cmd += ["-ss", str(args.start)]
+        cmd += ["-i", str(video)]
+        if args.seconds > 0:
+            cmd += ["-t", str(args.seconds)]
+        cmd += ["-c", "copy", str(src)]
+        subprocess.run(cmd, check=True)
 
     media = asr.probe_duration(src) or args.seconds
     print(f"样本：{src}  时长 {media:.1f}s  模型 {args.model}  CPU int8  线程 {threads}"
