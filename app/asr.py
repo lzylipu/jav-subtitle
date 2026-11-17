@@ -111,14 +111,19 @@ def probe_duration(video: Path) -> float:
 
 def extract_audio(video: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_name(output.name + ".part")
+    tmp.unlink(missing_ok=True)
     proc = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
          "-i", str(video), "-vn", "-ac", "1", "-ar", "16000",
-         "-c:a", "pcm_s16le", str(output)],
+         "-c:a", "pcm_s16le", "-f", "wav", str(tmp)],
         capture_output=True, text=True, timeout=3600,
     )
-    if proc.returncode == 0:
+    if proc.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+        tmp.replace(output)
         return
+    # 失败时删除半成品，避免下次重试把损坏音频当成有效缓存。
+    tmp.unlink(missing_ok=True)
     # ffmpeg 的原始报错（一长串命令行 + returncode 183）对用户毫无意义，
     # 真正的原因几乎都是「文件损坏 / 不是视频 / 没有音轨」，直接说清楚。
     detail = (proc.stderr or "").strip().splitlines()
@@ -318,14 +323,23 @@ def merge_words(target: list[dict[str, Any]], incoming: list[dict[str, Any]]) ->
 
     只认「文本相同 + 起点相差不到 0.6 秒」为重复，不做模糊匹配：
     短助词（は / が / を）本来就密集，模糊合并会把正常对白吃掉。
+
+    候选不能只查最后 8 个词：2 秒重叠区可能包含十几个密集日语词，
+    固定窗口会漏合并并制造重复字幕。这里按时间范围扫描所有可能重叠的词。
     """
     for word in incoming:
-        for prev in reversed(target[-8:]):
-            if prev["text"] == word["text"] and abs(prev["start"] - word["start"]) < 0.6:
-                prev["end"] = max(prev["end"], word["end"])
+        duplicate = None
+        for prev in target:
+            if prev["start"] > word["start"] + 0.6:
                 break
-        else:
+            if (prev["text"] == word["text"]
+                    and abs(prev["start"] - word["start"]) < 0.6):
+                duplicate = prev
+                break
+        if duplicate is None:
             target.append(word)
+        else:
+            duplicate["end"] = max(duplicate["end"], word["end"])
 
 
 def window_ranges(duration: float, window: float = ASR_WINDOW_SECONDS,
@@ -422,7 +436,10 @@ def _collect_windowed(model: Any, batched: Any, audio: Path, duration: float,
 
 def _vad_ladder(model: Any, batched: Any, audio: Path, duration: float,
                 ranges: list[tuple[float, float]], base: dict[str, Any],
-                batch_size: int, progress: Callable[[float, str], None] | None
+                batch_size: int, progress: Callable[[float, str], None] | None,
+                initial_words: list[dict[str, Any]] | None = None,
+                initial_language: str = "",
+                initial_threshold: float | None = None
                 ) -> tuple[list[dict[str, Any]], str]:
     """按 VAD 阶梯逐级尝试，返回覆盖率最高的一档结果。
 
@@ -430,16 +447,29 @@ def _vad_ladder(model: Any, batched: Any, audio: Path, duration: float,
     最多退到 threshold 0.05；仍然不达标就彻底关掉 VAD，把整轨交给模型。
     每档都比上一档更宽松，所以只要有一档把人声捞回来就停，
     不会白白跑完全部档位。
+
+    ``initial_words`` 用于复用已经跑过的严格档结果，避免短音频把 threshold=0.5
+    白跑两遍。进度回调按阶梯映射到单调区间，重试时界面不会倒退。
     """
-    best_words: list[dict[str, Any]] = []
-    best_coverage = -1.0
-    language = ""
+    best_words: list[dict[str, Any]] = list(initial_words or [])
+    best_coverage = speech_coverage(best_words, duration) if best_words else -1.0
+    language = initial_language
     plans: list[dict[str, Any]] = [{**base, "vad_parameters": dict(vad)}
                                    for vad in VAD_LADDER]
     plans.append({**base, **VAD_OFF})
-    for level, kwargs in enumerate(plans):
-        words, lang = _collect_windowed(
-            model, batched, audio, duration, ranges, kwargs, batch_size, progress)
+    start_level = 0
+    if initial_threshold is not None:
+        for index, kwargs in enumerate(plans):
+            threshold = kwargs.get("vad_parameters", {}).get("threshold")
+            if threshold == initial_threshold:
+                start_level = index
+                break
+    for level, kwargs in enumerate(plans[start_level:], start=start_level):
+        if level == start_level and initial_words is not None:
+            words, lang = list(initial_words), initial_language
+        else:
+            words, lang = _collect_windowed(
+                model, batched, audio, duration, ranges, kwargs, batch_size, progress)
         coverage = speech_coverage(words, duration)
         language = language or lang
         if coverage > best_coverage:
@@ -543,7 +573,9 @@ def transcribe_audio(
                         and work_audio.is_file() and work_audio.stat().st_size > 0):
                     words, language_out = _vad_ladder(
                         model, batched, work_audio, duration,
-                        [(0.0, duration)], base, batch_size, progress)
+                        [(0.0, duration)], base, batch_size, progress,
+                        initial_words=words, initial_language=language_out,
+                        initial_threshold=VAD_STRICT["threshold"])
             words = filter_low_confidence(words)
             result = resegment(words, gap=split_gap,
                                max_seconds=max_cue_seconds, max_chars=max_cue_chars)

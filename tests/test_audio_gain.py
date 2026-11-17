@@ -9,6 +9,7 @@
 这些用例不跑模型，只锁住决策逻辑：什么时候增益、增益多少、VAD 怎么退。
 """
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -149,6 +150,39 @@ class VadLadderTests(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         # 四档都低于下限，取覆盖率最高的第二档
         self.assertAlmostEqual(words[0]["end"], 3.0)
+
+    def test_existing_strict_result_is_reused_instead_of_inferred_twice(self):
+        collect, calls = self._fake_collect([0.01, 0.4])
+        strict = [{"start": 0.0, "end": 1.0, "text": "あ", "prob": 0.9}]
+        with mock.patch.object(asr, "_collect_windowed", collect):
+            words, _lang = asr._vad_ladder(
+                None, None, Path("/x.wav"), 100.0, [(0.0, 100.0)], {}, 1, None,
+                initial_words=strict, initial_language="ja",
+                initial_threshold=0.5)
+        self.assertEqual(calls, [0.2, 0.05])
+        self.assertAlmostEqual(words[0]["end"], 40.0)
+
+
+class MergeWordsTests(unittest.TestCase):
+    def test_duplicate_is_found_beyond_last_eight_words(self):
+        target = [{"start": float(i), "end": float(i) + 0.1,
+                   "text": f"w{i}", "prob": 0.9} for i in range(20)]
+        asr.merge_words(target, [{"start": 18.0, "end": 18.2,
+                                  "text": "w18", "prob": 0.9}])
+        self.assertEqual(len(target), 20)
+        self.assertAlmostEqual(target[18]["end"], 18.2)
+
+
+class ExtractAudioTests(unittest.TestCase):
+    def test_failed_extraction_does_not_leave_usable_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "audio.wav"
+            proc = FakeCompleted(returncode=1, stderr="bad input")
+            with mock.patch.object(asr.subprocess, "run", return_value=proc):
+                with self.assertRaises(ValueError):
+                    asr.extract_audio(Path(tmp) / "video.mp4", output)
+            self.assertFalse(output.exists())
+            self.assertFalse(output.with_name(output.name + ".part").exists())
 
 
 class WindowRangeTests(unittest.TestCase):

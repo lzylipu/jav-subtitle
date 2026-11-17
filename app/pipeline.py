@@ -207,13 +207,17 @@ def handle_asr(job: dict, settings: Settings) -> None:
 
     started = time.time()
     last_push = [0.0]
+    last_progress = [0]
 
     def progress(ratio: float, text: str) -> None:
         stamp = time.time()
         if stamp - last_push[0] < 2.0 and ratio < 0.99:
             return
         last_push[0] = stamp
-        update_job(job["id"], progress=10 + int(ratio * 60), message=(text or "")[:120])
+        # VAD 阶梯会重新推理；局部窗口进度不能把任务进度从 70% 拉回 10%。
+        value = max(last_progress[0], 10 + int(ratio * 60))
+        last_progress[0] = value
+        update_job(job["id"], progress=value, message=(text or "")[:120])
 
     # 3GB 小机器上 medium 模型峰值 2.4GB，直接跑会被 cgroup OOM 杀掉。
     # 内存不够时降一档并在任务日志里说明，别让用户只看到「任务莫名失败」。
