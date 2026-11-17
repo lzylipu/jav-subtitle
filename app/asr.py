@@ -16,8 +16,12 @@ logger = logging.getLogger(__name__)
 # 这样 app.asr 里的纯函数（重切句、trim、去重复）可以被单独测试，
 # 不必先装几百 MB 的模型依赖；CI 和本地跑单测都快很多。
 
-# 每个线程一份模型实例：ctranslate2 内部有线程池，跨线程共享容易互相拖慢
-_CACHE: dict[tuple[int, str, int], tuple[Any, Any]] = {}
+# ASR 推理串行化：同一个 2 核/3GB 主机上并发加载两份模型会直接 OOM。
+# 翻译属于网络等待，可以并发；ASR 的模型和工作区是内存瓶颈，只能串行。
+_ASR_INFERENCE_LOCK = threading.RLock()
+
+# 只保留当前模型。旧实例不能在设置切换时与新实例同时驻留内存。
+_MODEL_CACHE: dict[tuple[str, int], tuple[Any, Any]] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -195,27 +199,32 @@ def normalize_audio(audio: Path, target_mean_db: float = AUDIO_TARGET_MEAN_DB,
 
 
 def get_model(name: str, cpu_threads: int):
-    """按 (模型, 线程数) 缓存模型；改设置就换一份，不混用。
+    """按 (模型, 线程数) 缓存唯一模型实例。
 
     固定 device="cpu" + compute_type="int8"：
     CTranslate2 只支持 CPU / NVIDIA CUDA / AMD ROCm 三种后端，Intel 核显、AMD 核显
     都不在里面，而为了用显卡换一套引擎并不值当（详见 README）。所以这条路只走 CPU。
     """
-    key = (threading.get_ident(), name, cpu_threads)
+    key = (name, cpu_threads)
     with _CACHE_LOCK:
-        if key not in _CACHE:
+        if key not in _MODEL_CACHE:
             whisper_model_cls, batched_cls = _load_engine()
             model = whisper_model_cls(name, device="cpu", compute_type="int8",
                                      cpu_threads=cpu_threads)
             batched = batched_cls(model=model) if batched_cls else None
-            _CACHE[key] = (model, batched)
-        return _CACHE[key]
+            _MODEL_CACHE[key] = (model, batched)
+        return _MODEL_CACHE[key]
 
 
 def clear_cache() -> None:
-    """改模型/线程数后调用，丢掉旧实例。"""
-    with _CACHE_LOCK:
-        _CACHE.clear()
+    """改模型/线程数后调用，丢掉旧实例。
+
+    必须和推理共用同一把锁：否则设置切换可能在新模型加载时把旧模型清掉，
+    两个实例短时间同时驻留内存。
+    """
+    with _ASR_INFERENCE_LOCK:
+        with _CACHE_LOCK:
+            _MODEL_CACHE.clear()
 
 
 def memory_available_bytes() -> int:
@@ -295,10 +304,14 @@ def recommend_model(requested: str, available_bytes: int | None = None) -> tuple
 
 def _run_engine(model: Any, batched: Any, path: Path, kwargs: dict[str, Any],
                 batch_size: int):
-    """按配置调用整轨或批推理引擎。"""
-    if batched is not None and batch_size > 1:
-        return batched.transcribe(str(path), batch_size=batch_size, **kwargs)
-    return model.transcribe(str(path), **kwargs)
+    """按配置调用整轨或批推理引擎。
+
+    推理全程串行：并发 ASR worker 会同时持有两份模型，3GB 主机上直接 OOM。
+    """
+    with _ASR_INFERENCE_LOCK:
+        if batched is not None and batch_size > 1:
+            return batched.transcribe(str(path), batch_size=batch_size, **kwargs)
+        return model.transcribe(str(path), **kwargs)
 
 
 def _collect_words(segments: Iterable[Any], offset: float = 0.0) -> list[dict[str, Any]]:

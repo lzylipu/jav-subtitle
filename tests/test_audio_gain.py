@@ -85,6 +85,19 @@ class AudioLevelTests(unittest.TestCase):
 class ModelMemoryGuardTests(unittest.TestCase):
     """3GB 小机器的模型护栏必须为系统和工作区留出真实余量。"""
 
+    def test_model_cache_is_shared_between_workers(self):
+        original = asr._MODEL_CACHE
+        asr._MODEL_CACHE = {}
+        try:
+            model, batched = object(), object()
+            with mock.patch.object(asr, "_load_engine", return_value=(mock.Mock(return_value=model), None)):
+                first = asr.get_model("small", 2)
+                second = asr.get_model("small", 2)
+            self.assertIs(first[0], second[0])
+            self.assertIs(first[0], model)
+        finally:
+            asr._MODEL_CACHE = original
+
     def test_medium_is_downgraded_when_system_reserve_would_overflow(self):
         name, note = asr.recommend_model("medium", available_bytes=2200 * (1 << 20))
         self.assertEqual(name, "small")

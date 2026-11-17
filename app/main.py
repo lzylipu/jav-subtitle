@@ -558,7 +558,8 @@ def set_settings(patch: SettingsPatch):
     data["scrape_enabled"] = True
     updated = Settings.from_dict(data)
     save_settings(updated)
-    # 模型或线程数变了就把已加载的实例丢掉，否则旧实例会一直沿用
+    # 模型或线程数变了就丢掉已加载的实例。等待正在进行的推理退出后再清，
+    # 避免旧模型和新模型短时间同时驻留，把 3GB 主机推到 OOM。
     if any(k in changes for k in ("cpu_threads", "whisper_model")):
         asr.clear_cache()
     pipeline.invalidate_settings_cache()
