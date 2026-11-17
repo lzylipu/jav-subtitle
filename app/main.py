@@ -995,4 +995,4 @@ def health():
             conn.execute("SELECT 1").fetchone()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"数据库不可用: {exc}") from exc
-    return {"ok": True, "version": "3.10.1"}
+    return {"ok": True, "version": "3.10.2"}

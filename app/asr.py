@@ -247,6 +247,8 @@ def memory_available_bytes() -> int:
 
 
 # 各模型在 int8 下大约需要的常驻内存（含 ctranslate2 工作区），用于选型护栏。
+# 这是「模型权重 + 推理工作区」的预算，不是进程 RSS 的精确上限；实测 medium
+# 在 3GB 机器上的峰值 RSS 约 2.8GB，因此阈值必须留出系统、音频和容器余量。
 MODEL_MEMORY_HINT = {
     "tiny": 0.6,
     "base": 0.8,
@@ -257,21 +259,30 @@ MODEL_MEMORY_HINT = {
     "large-v3": 3.4,
 }
 
+# 小内存机器必须给系统、ffmpeg、SQLite 和容器运行时留出余量。只拿可用内存
+# 的 70% 做模型预算，仍不足以解释 3GB 主机上 medium 接近 2.8GB 的峰值 RSS。
+MODEL_MEMORY_RESERVE_BYTES = 768 * (1 << 20)
+
 
 def recommend_model(requested: str, available_bytes: int | None = None) -> tuple[str, str]:
     """按可用内存给出建议模型。
 
     返回 (模型, 说明)。内存不够时不是直接失败，而是降档并说明原因 ——
     在 3GB 机器上跑 medium 只会被 OOM 杀掉，等于白跑。
+
+    预算按「当前可用内存 - 固定系统余量」计算，避免只看机器总内存或瞬时
+    MemAvailable 时，把 medium 放进一台实际上已经放不下的 3GB LXC。
     """
     avail = memory_available_bytes() if available_bytes is None else available_bytes
+    budget = max(0, avail - MODEL_MEMORY_RESERVE_BYTES)
     need = MODEL_MEMORY_HINT.get(requested, 1.5) * (1 << 30)
-    if avail and avail < need:
+    if avail and need > budget:
         # 从大到小找一个装得下的
         for name in ("large-v3", "large-v2", "large", "medium", "small", "base", "tiny"):
-            if MODEL_MEMORY_HINT[name] * (1 << 30) <= avail * 0.7:
+            if MODEL_MEMORY_HINT[name] * (1 << 30) <= budget:
                 return name, (f"可用内存 {avail / (1 << 30):.1f}GB 装不下 {requested}"
-                              f"（需约 {need / (1 << 30):.1f}GB），已降级为 {name}")
+                              f"（需约 {need / (1 << 30):.1f}GB，留出系统余量后仅"
+                              f" {budget / (1 << 30):.1f}GB），已降级为 {name}")
         return "tiny", (f"可用内存 {avail / (1 << 30):.1f}GB 非常紧张，"
                         f"已降级为 tiny，请保持机器空闲")
     return requested, ""

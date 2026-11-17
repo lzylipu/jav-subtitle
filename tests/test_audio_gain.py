@@ -81,6 +81,25 @@ class AudioLevelTests(unittest.TestCase):
                 asr.normalize_audio(self.audio)
 
 
+class ModelMemoryGuardTests(unittest.TestCase):
+    """3GB 小机器的模型护栏必须为系统和工作区留出真实余量。"""
+
+    def test_medium_is_downgraded_when_system_reserve_would_overflow(self):
+        name, note = asr.recommend_model("medium", available_bytes=2200 * (1 << 20))
+        self.assertEqual(name, "small")
+        self.assertIn("系统余量", note)
+
+    def test_small_is_kept_when_budget_is_sufficient(self):
+        name, note = asr.recommend_model("small", available_bytes=2200 * (1 << 20))
+        self.assertEqual(name, "small")
+        self.assertEqual(note, "")
+
+    def test_medium_is_kept_on_a_machine_with_headroom(self):
+        name, note = asr.recommend_model("medium", available_bytes=3200 * (1 << 20))
+        self.assertEqual(name, "medium")
+        self.assertEqual(note, "")
+
+
 class VadLadderTests(unittest.TestCase):
     """VAD 阶梯：覆盖率不达标就逐级放宽，取覆盖率最高的一档。"""
 
