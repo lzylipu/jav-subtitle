@@ -42,9 +42,9 @@ PROVIDER_LABELS = {
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-# 谷歌网页翻译接口自带的公开 key（TWPT 内置的 fallback）。
-# 失效时会自动从 translate_http 的 js 里抓一个新的，抓不到才报错。
-GOOGLE_FALLBACK_KEY = "REDACTED_GOOGLE_WEB_KEY"
+# 谷歌网页翻译接口的 key 从前端公开 JS 动态获取，不在源码或 Git 历史里
+# 保存任何 key-shaped 字面量。若前端结构变化，可通过设置页显式配置
+# google_api_key 覆盖。
 GOOGLE_AUTH_JS = ("https://translate.googleapis.com/_/translate_http/_/js/"
                   "k=translate_http.tr.en_US.YusFYy3P_ro.O/am=AAg/d=1/exm=el_conf/"
                   "ed=1/rs=AN8SPfq1Hb8iJRleQqQc8zhdzXmF9E56eQ/m=el_main")
@@ -433,7 +433,7 @@ class GoogleTranslator(BaseTranslator):
         super().__init__(**kwargs)
         self.source_language = _lang("google", source_language)
         self.target_language = _lang("google", target_language)
-        self.api_key = clean_secret(api_key) or GOOGLE_FALLBACK_KEY
+        self.api_key = clean_secret(api_key)
 
     def _headers(self) -> dict[str, str]:
         return {"Content-Type": "application/json+protobuf",
@@ -441,7 +441,7 @@ class GoogleTranslator(BaseTranslator):
                 "User-Agent": BROWSER_UA}
 
     def _refresh_key(self) -> bool:
-        """内置 key 失效时去谷歌前端 js 里抓一个当前的。"""
+        """从谷歌前端公开 js 里获取当前 key。"""
         try:
             resp = self.client.get(GOOGLE_AUTH_JS, headers={"User-Agent": BROWSER_UA})
             match = re.search(r'["\']x-goog-api-key["\']\s*:\s*["\'](\w{39})["\']',

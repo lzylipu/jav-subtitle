@@ -215,13 +215,13 @@ class GoogleTests(unittest.TestCase):
             seen["body"] = request.content.decode()
             return httpx.Response(200, json=[["早上好", "谢谢"]])
 
-        tr = T.GoogleTranslator("ja", "zh-CN", retries=1)
+        tr = T.GoogleTranslator("ja", "zh-CN", retries=1, api_key="configured-key")
         tr.client = _client(handler)
         out = tr.translate_texts(["おはよう", "ありがとう"])
         self.assertEqual(out, ["早上好", "谢谢"])
         self.assertTrue(seen["url"].endswith("/v1/translateHtml"))
         self.assertEqual(seen["ctype"], "application/json+protobuf")
-        self.assertTrue(seen["key"])
+        self.assertEqual(seen["key"], "configured-key")
         self.assertIn("おはよう", seen["body"])
         self.assertIn('"ja"', seen["body"])
         self.assertIn('"zh-CN"', seen["body"])
@@ -238,13 +238,13 @@ class GoogleTests(unittest.TestCase):
             if request.url.path.endswith("/translateHtml"):
                 key = request.headers.get("x-goog-api-key")
                 keys.append(key)
-                if key == T.GOOGLE_FALLBACK_KEY:
+                if key == "expired-key":
                     return httpx.Response(403, json={"error": "denied"})
                 return httpx.Response(200, json=[["你好"]])
             # 抓新 key 的 js
             return httpx.Response(200, text='{"x-goog-api-key":"Abcdefghijklmnopqrstuvwxyz0123456789XYZ"}')
 
-        tr = T.GoogleTranslator("ja", "zh-CN", retries=1)
+        tr = T.GoogleTranslator("ja", "zh-CN", retries=1, api_key="expired-key")
         tr.client = _client(handler)
         out = tr.translate_texts(["こんにちは"])
         self.assertEqual(out, ["你好"])
