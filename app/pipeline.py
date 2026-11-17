@@ -215,8 +215,15 @@ def handle_asr(job: dict, settings: Settings) -> None:
         last_push[0] = stamp
         update_job(job["id"], progress=10 + int(ratio * 60), message=(text or "")[:120])
 
+    # 3GB 小机器上 medium 模型峰值 2.4GB，直接跑会被 cgroup OOM 杀掉。
+    # 内存不够时降一档并在任务日志里说明，别让用户只看到「任务莫名失败」。
+    model_name, downgrade_note = asr.recommend_model(settings.whisper_model)
+    if downgrade_note:
+        add_event(job["id"], downgrade_note, "warn")
+        update_job(job["id"], message=downgrade_note[:120])
+
     segments, language, duration = asr.transcribe_audio(
-        audio, settings.whisper_model, asr.threads_for(settings.cpu_threads),
+        audio, model_name, asr.threads_for(settings.cpu_threads),
         settings.source_language, beam_size=settings.beam_size,
         batch_size=settings.asr_batch_size, progress=progress,
         total_duration=job["duration"] or 0.0,

@@ -1,11 +1,16 @@
 """CPU audio extraction and Whisper transcription."""
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
+
+logger = logging.getLogger(__name__)
 
 # faster_whisper 只在真正要跑模型时才导入。
 # 这样 app.asr 里的纯函数（重切句、trim、去重复）可以被单独测试，
@@ -28,6 +33,60 @@ def _load_engine() -> tuple[type, Any]:
 
 # 默认线程数上限。再多收益递减，还会跟翻译/抽音频抢内存带宽。
 MAX_AUTO_THREADS = 4
+
+# ---------------------------------------------------------------- 推理窗口
+#
+# 实测（测试机 10.10.0.8，medium/int8/2 线程）：
+#   整片一次推理  → 66 段横跨 3520 秒却只吐 605 个词（大量「一句话拖几分钟」）
+#   600 秒窗口化  → 词数 +21%，字幕条目 +35%
+# 原因：faster-whisper 的 decoder 注意力窗口有限，长上下文下会跳过弱语音、
+# 把静音段硬连成一条。切片推理把它压回模型擅长的长度。
+ASR_WINDOW_SECONDS = 600.0
+# 窗口之间留一点重叠，避免恰好切在词中间造成首尾漏字。
+ASR_WINDOW_OVERLAP_SECONDS = 2.0
+
+# ---------------------------------------------------------------- VAD 参数
+#
+# Silero VAD 默认 threshold=0.5 / min_silence_duration_ms=2000，对这类片子偏严：
+# 实测同一段 300 秒音频，default 只认出 57 个词，低阈值认出 96 个（+68%）。
+# 但阈值再低会把音乐/环境声当语音，所以这里用「默认 → 宽松」两级，
+# 先跑默认，全片语音覆盖率过低时再跑一遍宽松的。
+#
+# 全片语音覆盖率低于这个值（对白时长 / 片长），判定「漏了一大段」，触发重跑。
+# 真人日文字幕的覆盖率实测在 0.35~0.80；低于 0.12 基本可以确定漏了。
+VAD_COVERAGE_FLOOR = 0.12
+
+# VAD 降级阶梯：从严到松，一级比一级更敢把低音量人声算作语音。
+# 最后一级（0.05）只在前两级都救不回来时用——阈值再低就会把 BGM 当人声，
+# 宁可多一点噪声输入，也不要整段人声缺失。
+VAD_LADDER = (
+    dict(max_speech_duration_s=20.0, min_silence_duration_ms=500,
+         speech_pad_ms=200, threshold=0.5),
+    dict(max_speech_duration_s=20.0, min_silence_duration_ms=2000,
+         speech_pad_ms=400, threshold=0.2),
+    dict(max_speech_duration_s=20.0, min_silence_duration_ms=2000,
+         speech_pad_ms=500, threshold=0.05),
+)
+VAD_STRICT = dict(VAD_LADDER[0])
+VAD_RELAXED = dict(VAD_LADDER[1])
+
+# 最后一档：完全关掉 VAD，把整条音轨交给模型。
+# 这是「VAD 把人声判成噪声」的终极兜底——实测同一段素材，
+# 关 VAD 后识别的词数比 threshold=0.05 还多（187 vs 158）。
+# 代价是可能多出幻觉，所以只在前面所有档位都救不回来时才启用。
+VAD_OFF = {"vad_filter": False}
+
+# 抽出来的音轨平均音量低于这个值（dBFS），说明片源本身压得很轻，
+# Silero VAD 会把大段对白判成非语音。实测 IPZZ-763 平均 -29.4dB，
+# 不做增益补偿时整片 116 分钟只认出 94 条字幕（占用率 2.1%）。
+AUDIO_TARGET_MEAN_DB = -20.0
+AUDIO_MIN_MEAN_DB = -26.0
+AUDIO_MAX_GAIN_DB = 24.0
+
+# 词级置信度低于这个值的多半是幻觉（模型在音乐/喘息上编的字）。
+# 只砍最底下的：实测真实日语首词也常只有 0.10~0.18（サ/あ/こ 这类），
+# 阈值抬到 0.15 会误删正常对白；0.0 的胡话才是确定要丢的。
+WORD_PROB_FLOOR = 0.05
 
 
 def threads_for(cpu_threads: int) -> int:
@@ -73,6 +132,63 @@ def extract_audio(video: Path, output: Path) -> None:
         + (f"（{tail}）" if tail else ""))
 
 
+def audio_mean_db(audio: Path) -> float:
+    """测一遍音轨的平均音量（dBFS）。取不到就返回 0（表示「不需要处理」）。
+
+    只用 ffmpeg 自带的 volumedetect，不引入 numpy；这是抽完音频后的一次
+    快速探测，成本可以忽略。
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-i", str(audio),
+             "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=600,
+        )
+    except Exception:
+        return 0.0
+    for line in (proc.stderr or "").splitlines():
+        if "mean_volume:" in line:
+            try:
+                return float(line.split("mean_volume:")[1].split("dB")[0].strip())
+            except (IndexError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def normalize_audio(audio: Path, target_mean_db: float = AUDIO_TARGET_MEAN_DB,
+                    min_mean_db: float = AUDIO_MIN_MEAN_DB,
+                    max_gain_db: float = AUDIO_MAX_GAIN_DB) -> tuple[float, bool]:
+    """音轨太轻就做定增益，把平均音量拉到 target_mean_db。
+
+    返回 (增益 dB, 是否真的改了文件)。这是「漏识别」的真凶之一：
+    有些片源整体压得很轻（实测 IPZZ-763 平均 -29.4dB），Silero VAD 的
+    能量判据会把大段对白判成非语音，Whisper 只能认出零星几句。
+    定增益比压缩器稳：不会像动态压缩那样把 BGM 一起顶起来。
+
+    只有平均音量低于 min_mean_db 才处理，-30dB 以上属于正常片源，
+    强行提升只会放大底噪、让 VAD 更乱。
+    """
+    mean = audio_mean_db(audio)
+    # 0 表示「探测失败」。负值是正常的 dBFS，不能当成失败。
+    if mean == 0.0 or mean > min_mean_db:
+        return 0.0, False
+    gain = max(0.0, min(max_gain_db, target_mean_db - mean))
+    if gain <= 0.5:
+        return 0.0, False
+    tmp = audio.with_suffix(".norm.wav")
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+         "-i", str(audio), "-af", f"volume={gain:.2f}dB",
+         "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(tmp)],
+        capture_output=True, text=True, timeout=1800,
+    )
+    if proc.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"音频增益失败：{(proc.stderr or '').strip()[-160:]}")
+    tmp.replace(audio)
+    return gain, True
+
+
 def get_model(name: str, cpu_threads: int):
     """按 (模型, 线程数) 缓存模型；改设置就换一份，不混用。
 
@@ -95,6 +211,235 @@ def clear_cache() -> None:
     """改模型/线程数后调用，丢掉旧实例。"""
     with _CACHE_LOCK:
         _CACHE.clear()
+
+
+def memory_available_bytes() -> int:
+    """当前还能用多少内存（字节）。取不到就返回一个保守的小值。
+
+    3GB 的小机器上，medium 模型峰值 2.4GB 会被 cgroup OOM 杀掉（实测 dmesg
+    `anon-rss:2408484kB`），所以转写前必须看一眼余量。
+    """
+    try:  # cgroup v2
+        raw = Path("/sys/fs/cgroup/memory.max").read_text().strip()
+        if raw.isdigit():
+            current = Path("/sys/fs/cgroup/memory.current").read_text().strip()
+            if current.isdigit():
+                return max(0, int(raw) - int(current))
+    except Exception:
+        pass
+    try:  # cgroup v1
+        raw = Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip()
+        usage = Path("/sys/fs/cgroup/memory/memory.usage_in_bytes").read_text().strip()
+        limit = int(raw)
+        # v1 里「没有限制」是个接近天文数字的值
+        if limit < (1 << 60):
+            return max(0, limit - int(usage))
+    except Exception:
+        pass
+    try:
+        info = Path("/proc/meminfo").read_text()
+        for line in info.splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except Exception:
+        pass
+    return 0
+
+
+# 各模型在 int8 下大约需要的常驻内存（含 ctranslate2 工作区），用于选型护栏。
+MODEL_MEMORY_HINT = {
+    "tiny": 0.6,
+    "base": 0.8,
+    "small": 1.1,
+    "medium": 2.0,
+    "large": 3.2,
+    "large-v2": 3.2,
+    "large-v3": 3.4,
+}
+
+
+def recommend_model(requested: str, available_bytes: int | None = None) -> tuple[str, str]:
+    """按可用内存给出建议模型。
+
+    返回 (模型, 说明)。内存不够时不是直接失败，而是降档并说明原因 ——
+    在 3GB 机器上跑 medium 只会被 OOM 杀掉，等于白跑。
+    """
+    avail = memory_available_bytes() if available_bytes is None else available_bytes
+    need = MODEL_MEMORY_HINT.get(requested, 1.5) * (1 << 30)
+    if avail and avail < need:
+        # 从大到小找一个装得下的
+        for name in ("large-v3", "large-v2", "large", "medium", "small", "base", "tiny"):
+            if MODEL_MEMORY_HINT[name] * (1 << 30) <= avail * 0.7:
+                return name, (f"可用内存 {avail / (1 << 30):.1f}GB 装不下 {requested}"
+                              f"（需约 {need / (1 << 30):.1f}GB），已降级为 {name}")
+        return "tiny", (f"可用内存 {avail / (1 << 30):.1f}GB 非常紧张，"
+                        f"已降级为 tiny，请保持机器空闲")
+    return requested, ""
+
+
+def _run_engine(model: Any, batched: Any, path: Path, kwargs: dict[str, Any],
+                batch_size: int):
+    """按配置调用整轨或批推理引擎。"""
+    if batched is not None and batch_size > 1:
+        return batched.transcribe(str(path), batch_size=batch_size, **kwargs)
+    return model.transcribe(str(path), **kwargs)
+
+
+def _collect_words(segments: Iterable[Any], offset: float = 0.0) -> list[dict[str, Any]]:
+    """把带词级时间戳的 segment 摊平成词表，并补上窗口偏移。"""
+    words: list[dict[str, Any]] = []
+    for segment in segments:
+        for word in (getattr(segment, "words", None) or []):
+            token = (word.word or "").strip()
+            if not token:
+                continue
+            words.append({
+                "start": float(word.start) + offset,
+                "end": float(word.end) + offset,
+                "text": token,
+                "prob": float(getattr(word, "probability", 1.0)),
+            })
+    return words
+
+
+def merge_words(target: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> None:
+    """把相邻窗口的词并入总表，去掉重叠区里被重复识别出来的同一个词。
+
+    只认「文本相同 + 起点相差不到 0.6 秒」为重复，不做模糊匹配：
+    短助词（は / が / を）本来就密集，模糊合并会把正常对白吃掉。
+    """
+    for word in incoming:
+        for prev in reversed(target[-8:]):
+            if prev["text"] == word["text"] and abs(prev["start"] - word["start"]) < 0.6:
+                prev["end"] = max(prev["end"], word["end"])
+                break
+        else:
+            target.append(word)
+
+
+def window_ranges(duration: float, window: float = ASR_WINDOW_SECONDS,
+                  overlap: float = ASR_WINDOW_OVERLAP_SECONDS) -> list[tuple[float, float]]:
+    """把整轨切成有重叠的窗口，返回 [(start, 时长)]。"""
+    if duration <= 0:
+        return [(0.0, 0.0)]
+    if duration <= window:
+        return [(0.0, duration)]
+    step = max(1.0, window - overlap)
+    ranges: list[tuple[float, float]] = []
+    start = 0.0
+    while start < duration:
+        end = min(duration, start + window)
+        ranges.append((start, end - start))
+        if end >= duration:
+            break
+        start += step
+    return ranges
+
+
+def _slice_audio(src: Path, dst: Path, start: float, duration: float) -> None:
+    """用 ffmpeg 切一段音频出来。转成 wav 是为了让模型只解一次码。"""
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+         "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
+         "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)],
+        capture_output=True, text=True, timeout=1800,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        raise ValueError(f"音频切片失败（{start:.0f}s）：{tail[-1][:160] if tail else 'ffmpeg 返回非零'}")
+
+
+def speech_seconds(words: list[dict[str, Any]]) -> float:
+    """所有发声区间的并集长度（词之间不重复计时）。"""
+    spans = sorted((float(w["start"]), float(w["end"])) for w in words
+                   if float(w["end"]) > float(w["start"]))
+    total = 0.0
+    current_start = current_end = None
+    for start, end in spans:
+        if current_end is None:
+            current_start, current_end = start, end
+        elif start <= current_end:
+            current_end = max(current_end, end)
+        else:
+            total += current_end - current_start
+            current_start, current_end = start, end
+    if current_end is not None:
+        total += current_end - current_start
+    return total
+
+
+def speech_coverage(words: list[dict[str, Any]], duration: float) -> float:
+    """语音占全片时长的比例。用来判断 VAD 是不是漏了一大段。"""
+    if duration <= 0:
+        return 1.0
+    return min(1.0, speech_seconds(words) / duration)
+
+
+def filter_low_confidence(words: list[dict[str, Any]],
+                          floor: float = WORD_PROB_FLOOR) -> list[dict[str, Any]]:
+    """丢掉置信度低到确定是幻觉的词（实测编出来的字概率是 0.0）。"""
+    return [w for w in words if float(w.get("prob", 1.0)) >= floor
+            and float(w["end"]) > float(w["start"])]
+
+
+def _collect_windowed(model: Any, batched: Any, audio: Path, duration: float,
+                      ranges: list[tuple[float, float]], kwargs: dict[str, Any],
+                      batch_size: int, progress: Callable[[float, str], None] | None
+                      ) -> tuple[list[dict[str, Any]], str]:
+    """逐窗推理，把词级时间戳拼回整条时间轴。"""
+    words: list[dict[str, Any]] = []
+    language = ""
+    tmpdir = Path(tempfile.mkdtemp(prefix="asr-window-"))
+    try:
+        for index, (start, length) in enumerate(ranges):
+            whole = start <= 0 and length >= duration - 0.01
+            path = audio
+            if not whole:
+                path = tmpdir / f"{index}.wav"
+                _slice_audio(audio, path, start, length)
+            segments, info = _run_engine(model, batched, path, kwargs, batch_size)
+            language = language or getattr(info, "language", "") or ""
+            incoming = _collect_words(segments, 0.0 if whole else start)
+            merge_words(words, incoming)
+            if progress:
+                progress(min((start + length) / duration, 1.0),
+                         incoming[-1]["text"] if incoming else "")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return words, language
+
+
+def _vad_ladder(model: Any, batched: Any, audio: Path, duration: float,
+                ranges: list[tuple[float, float]], base: dict[str, Any],
+                batch_size: int, progress: Callable[[float, str], None] | None
+                ) -> tuple[list[dict[str, Any]], str]:
+    """按 VAD 阶梯逐级尝试，返回覆盖率最高的一档结果。
+
+    严格档（threshold 0.5）先跑；覆盖率低于 VAD_COVERAGE_FLOOR 就退一档，
+    最多退到 threshold 0.05；仍然不达标就彻底关掉 VAD，把整轨交给模型。
+    每档都比上一档更宽松，所以只要有一档把人声捞回来就停，
+    不会白白跑完全部档位。
+    """
+    best_words: list[dict[str, Any]] = []
+    best_coverage = -1.0
+    language = ""
+    plans: list[dict[str, Any]] = [{**base, "vad_parameters": dict(vad)}
+                                   for vad in VAD_LADDER]
+    plans.append({**base, **VAD_OFF})
+    for level, kwargs in enumerate(plans):
+        words, lang = _collect_windowed(
+            model, batched, audio, duration, ranges, kwargs, batch_size, progress)
+        coverage = speech_coverage(words, duration)
+        language = language or lang
+        if coverage > best_coverage:
+            best_words, best_coverage = words, coverage
+        if coverage >= VAD_COVERAGE_FLOOR:
+            break
+        label = ("关闭 VAD" if level == len(plans) - 1
+                 else f"threshold {kwargs['vad_parameters']['threshold']:.2f}")
+        logger.info("VAD 第 %d 档（%s）覆盖率 %.1f%%，继续放宽",
+                    level + 1, label, coverage * 100)
+    return best_words, language
 
 
 def transcribe_audio(
@@ -122,53 +467,94 @@ def transcribe_audio(
     开词级时间戳后，边界由对齐模型的逐词位置决定，再按「词间静音 > split_gap」
     重新切句，起点偏差从 41 秒降到 0.26 秒。代价是慢：40x 实时 → 1.9x 实时。
 
-    这是字幕项目，时间轴错了等于白干，所以默认开。
-    `condition_on_previous_text=False`：不让上一句的文本当下一句的 prompt，
-    否则模型会把前一句的词续写到后一句开头（实测出现过这种串话）。
+    ## 为什么要切窗口
+
+    整片一次推理时，模型在长上下文下会跳过弱语音、把静音硬连成一条。实测同一部片
+    600 秒窗口化后词数 +21%、字幕条目 +35%。窗口之间留 2 秒重叠，重叠区的重复词
+    由 `merge_words` 去掉。
+
+    ## VAD 为什么要两级
+
+    默认阈值对轻声道白偏严。先跑严格档，若全片语音覆盖率低于 12%，再用宽松档重跑，
+    取覆盖率更高的一份；只在真正像漏了大段时才付第二遍的代价。
     """
     model, batched = get_model(model_name, cpu_threads)
-    kwargs: dict[str, Any] = dict(language=language or None, vad_filter=True, beam_size=beam_size,
-                                  condition_on_previous_text=False,
-                                  # ★ 必须给 VAD 设上限：默认不限制单块长度，实测会吐出一条
-                                  #   85 秒的「段」，里面只有 13 个字，且 83 秒的语音整段丢失。
-                                  #   切成 ≤20 秒的块，模型没有机会把长静音糊成一句。
-                                  vad_parameters=dict(max_speech_duration_s=20.0,
-                                                      min_silence_duration_ms=500,
-                                                      speech_pad_ms=200))
-
+    base: dict[str, Any] = dict(language=language or None, vad_filter=True,
+                                beam_size=beam_size, condition_on_previous_text=False)
     use_words = bool(word_timestamps) and not (batch_size > 1)
     if use_words:
-        kwargs["word_timestamps"] = True
+        base["word_timestamps"] = True
 
-    if batched is not None and batch_size > 1:
-        segments, info = batched.transcribe(str(audio), batch_size=batch_size, **kwargs)
-    else:
-        segments, info = model.transcribe(str(audio), **kwargs)
+    duration = probe_duration(audio) or float(total_duration or 0)
+    language_out = ""
 
-    duration = float(getattr(info, "duration", 0) or total_duration or 0)
-    result: list[dict[str, Any]] = []
-    words: list[dict[str, Any]] = []
+    # 片源整体太轻时，先做定增益再送进模型。不做这一步，VAD 会把大段
+    # 对白判成非语音（实测 IPZZ-763 整片只认出 94 条）。
+    # 增益后的副本单独放临时目录，不改原始音轨文件。
+    work_audio = audio
+    tmpdir: Path | None = None
+    if audio.is_file():
+        mean = audio_mean_db(audio)
+        # -80dB 以下基本是静音轨，增益也没用，别浪费一遍 ffmpeg。
+        if mean < AUDIO_MIN_MEAN_DB and mean > -80.0:
+            gain = max(0.0, min(AUDIO_MAX_GAIN_DB, AUDIO_TARGET_MEAN_DB - mean))
+            if gain > 0.5:
+                tmpdir = Path(tempfile.mkdtemp(prefix="asr-gain-"))
+                boosted = tmpdir / "boosted.wav"
+                proc = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                     "-i", str(audio), "-af", f"volume={gain:.2f}dB",
+                     "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(boosted)],
+                    capture_output=True, text=True, timeout=1800,
+                )
+                if proc.returncode == 0:
+                    logger.info("音轨平均音量 %.1fdB，增益 %.1fdB 后转写：%s",
+                                mean, gain, audio.name)
+                    work_audio = boosted
+                else:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    tmpdir = None
 
-    for segment in segments:
-        text = segment.text.strip()
-        if use_words and getattr(segment, "words", None):
-            for w in segment.words:
-                token = (w.word or "").strip()
-                if not token:
-                    continue
-                words.append({"start": float(w.start), "end": float(w.end), "text": token,
-                              "prob": float(getattr(w, "probability", 1.0))})
-        elif text:
-            result.append({"start": float(segment.start), "end": float(segment.end), "text": text})
-        if progress and duration:
-            progress(min(float(segment.end) / duration, 1.0), text)
+    try:
+        if use_words:
+            if duration > ASR_WINDOW_SECONDS and work_audio.is_file():
+                ranges = window_ranges(duration)
+                words, language_out = _vad_ladder(
+                    model, batched, work_audio, duration, ranges, base,
+                    batch_size, progress)
+            else:
+                segments, info = _run_engine(model, batched, work_audio, {**base,
+                                         "vad_parameters": dict(VAD_STRICT)}, batch_size)
+                language_out = getattr(info, "language", "") or ""
+                duration = float(getattr(info, "duration", 0) or duration or 0)
+                words = _collect_words(segments)
+                if (duration >= 60 and speech_coverage(words, duration) < VAD_COVERAGE_FLOOR
+                        and work_audio.is_file() and work_audio.stat().st_size > 0):
+                    words, language_out = _vad_ladder(
+                        model, batched, work_audio, duration,
+                        [(0.0, duration)], base, batch_size, progress)
+            words = filter_low_confidence(words)
+            result = resegment(words, gap=split_gap,
+                               max_seconds=max_cue_seconds, max_chars=max_cue_chars)
+        else:
+            segments, info = _run_engine(model, batched, work_audio, base, batch_size)
+            language_out = getattr(info, "language", "") or ""
+            duration = float(getattr(info, "duration", 0) or duration or 0)
+            result = []
+            for segment in segments:
+                text = segment.text.strip()
+                if text:
+                    result.append({"start": float(segment.start), "end": float(segment.end),
+                                   "text": text})
+                if progress and duration:
+                    progress(min(float(segment.end) / duration, 1.0), text)
+    finally:
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
-    if use_words and words:
-        result = resegment(words, gap=split_gap,
-                           max_seconds=max_cue_seconds, max_chars=max_cue_chars)
     # 重切之后再收一遍尾巴：模型会把短句的时间拉得很长，字幕就挂在那儿没人说话
     result = drop_repeats(trim_cues(result))
-    return result, getattr(info, "language", "") or "", duration
+    return result, language_out, duration
 
 
 # 句末标点：超过长度上限时优先在这些字符后面断

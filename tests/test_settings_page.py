@@ -181,6 +181,7 @@ class MaskWriteBackTest(unittest.TestCase):
 
     def test_real_key_survives_round_trip(self):
         from app.config import Settings
+        # 用假 key，只验证「真实 key 能原样存回去」这条语义，不放真凭据进仓库
         key = "00000000-0000-4000-8000-000000000000:fx"
         self.assertEqual(Settings.from_dict({"deepl_api_key": key}).deepl_api_key, key)
 
