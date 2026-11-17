@@ -4,7 +4,7 @@
 """
 import unittest
 
-from tools.subtitle_compare import Cue, compare, describe, parse_srt, start_offsets
+from tools.subtitle_compare import Cue, compare, describe, parse_srt, start_offsets, text_style
 
 
 class ParseTests(unittest.TestCase):
@@ -75,6 +75,21 @@ class AlignmentTests(unittest.TestCase):
         report = compare(ref, out)
         self.assertLess(report["alignment"]["paired"], len(ref))
         self.assertEqual(report["produced"]["cues"], 1)
+
+
+class StyleTests(unittest.TestCase):
+    def test_reports_line_and_leading_conventions(self):
+        cues = [Cue(1.0, 3.0, "第一行\n第二行"), Cue(5.0, 7.0, "短句")]
+        style = text_style(cues)
+        self.assertEqual(style["text_lines"], 3)
+        self.assertEqual(style["lines_per_cue_median"], 1)
+        self.assertEqual(style["line_chars_median"], 3)
+        self.assertEqual(style["leading_gap_s"], 1.0)
+
+    def test_empty_cues_have_safe_style_values(self):
+        style = text_style([])
+        self.assertEqual(style["text_lines"], 0)
+        self.assertEqual(style["max_line_chars"], 0)
 
 
 if __name__ == "__main__":

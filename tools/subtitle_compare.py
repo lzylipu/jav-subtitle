@@ -82,6 +82,29 @@ def _percentile(values: list[float], q: float) -> float:
     return round(ordered[pos], 3)
 
 
+def text_style(cues: list[Cue]) -> dict:
+    """描述字幕的书写习惯，而不是具体文案。
+
+    人工字幕和 ASR 输出最容易被忽略的差异不只在时间轴，还在“每条写多长、
+    一次放几行、开头留多久、末尾留多久”。这些指标可以在不同影片之间比较。
+    """
+    lines = [line for cue in cues for line in cue.text.splitlines() if line.strip()]
+    lengths = [len(line.strip()) for line in lines]
+    per_cue_lines = [len([line for line in cue.text.splitlines() if line.strip()])
+                     for cue in cues]
+    last_end = max((cue.end for cue in cues), default=0.0)
+    return {
+        "text_lines": len(lines),
+        "lines_per_cue_median": _percentile([float(x) for x in per_cue_lines], 0.5),
+        "lines_per_cue_p95": _percentile([float(x) for x in per_cue_lines], 0.95),
+        "line_chars_median": _percentile([float(x) for x in lengths], 0.5),
+        "line_chars_p95": _percentile([float(x) for x in lengths], 0.95),
+        "max_line_chars": max(lengths, default=0),
+        "leading_gap_s": round(cues[0].start, 3) if cues else 0.0,
+        "tail_margin_s": round(last_end, 3),
+    }
+
+
 def describe(cues: list[Cue]) -> dict:
     durations = [round(c.end - c.start, 3) for c in cues]
     span = round(max((c.end for c in cues), default=0.0), 3)
@@ -108,6 +131,7 @@ def describe(cues: list[Cue]) -> dict:
         "gaps_gt_2s": len(gaps),
         "gap_seconds_gt_2s": round(sum(gaps), 3),
         "overlaps": overlaps,
+        "style": text_style(cues),
     }
 
 
