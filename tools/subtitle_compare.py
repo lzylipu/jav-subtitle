@@ -28,6 +28,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from bisect import bisect_left
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -82,6 +83,10 @@ def _percentile(values: list[float], q: float) -> float:
     return round(ordered[pos], 3)
 
 
+def _display_width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
 def text_style(cues: list[Cue]) -> dict:
     """描述字幕的书写习惯，而不是具体文案。
 
@@ -90,6 +95,7 @@ def text_style(cues: list[Cue]) -> dict:
     """
     lines = [line for cue in cues for line in cue.text.splitlines() if line.strip()]
     lengths = [len(line.strip()) for line in lines]
+    columns = [_display_width(line.strip()) for line in lines]
     per_cue_lines = [len([line for line in cue.text.splitlines() if line.strip()])
                      for cue in cues]
     last_end = max((cue.end for cue in cues), default=0.0)
@@ -100,6 +106,9 @@ def text_style(cues: list[Cue]) -> dict:
         "line_chars_median": _percentile([float(x) for x in lengths], 0.5),
         "line_chars_p95": _percentile([float(x) for x in lengths], 0.95),
         "max_line_chars": max(lengths, default=0),
+        "line_columns_median": _percentile([float(x) for x in columns], 0.5),
+        "line_columns_p95": _percentile([float(x) for x in columns], 0.95),
+        "max_line_columns": max(columns, default=0),
         "leading_gap_s": round(cues[0].start, 3) if cues else 0.0,
         "tail_margin_s": round(last_end, 3),
     }
@@ -109,11 +118,8 @@ def describe(cues: list[Cue]) -> dict:
     durations = [round(c.end - c.start, 3) for c in cues]
     span = round(max((c.end for c in cues), default=0.0), 3)
     speech = round(sum(durations), 3)
-    gaps = []
-    for prev, nxt in zip(cues, cues[1:]):
-        gap = nxt.start - prev.end
-        if gap > 2.0:
-            gaps.append(round(gap, 3))
+    all_gaps = [round(nxt.start - prev.end, 3) for prev, nxt in zip(cues, cues[1:])]
+    gaps = [gap for gap in all_gaps if gap > 2.0]
     overlaps = 0
     for prev, nxt in zip(cues, cues[1:]):
         if nxt.start < prev.end - 0.05:
@@ -130,7 +136,15 @@ def describe(cues: list[Cue]) -> dict:
         "over_12s": sum(1 for d in durations if d > 12.0),
         "gaps_gt_2s": len(gaps),
         "gap_seconds_gt_2s": round(sum(gaps), 3),
+        "gap_median_s": _percentile(all_gaps, 0.5),
+        "gap_p95_s": _percentile(all_gaps, 0.95),
+        "adjacent_ratio": (round(sum(1 for gap in all_gaps if abs(gap) <= 0.1) / len(all_gaps), 4)
+                          if all_gaps else 0.0),
         "overlaps": overlaps,
+        "chars_median": _percentile([float(len(cue.text.replace("\n", ""))) for cue in cues], 0.5),
+        "chars_p95": _percentile([float(len(cue.text.replace("\n", ""))) for cue in cues], 0.95),
+        "chars_per_speech_s": round(sum(len(cue.text.replace("\n", "")) for cue in cues) / speech, 2)
+                             if speech else 0.0,
         "style": text_style(cues),
     }
 

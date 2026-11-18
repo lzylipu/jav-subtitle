@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import asr  # noqa: E402
-from app.subtitles import Cue as SrtCue, render_srt  # noqa: E402
+from app.subtitles import Cue as SrtCue, format_cues, render_srt  # noqa: E402
 from tools.subtitle_compare import Cue, describe  # noqa: E402
 
 
@@ -87,8 +87,8 @@ def main() -> int:
               f"大空档 {stats['gaps_gt_2s']} 处")
         if args.srt:
             frames = asr.transcript_to_cues(segments)
-            cues = [SrtCue(i + 1, f["start"], f["end"], f["text"])
-                    for i, f in enumerate(frames)]
+            cues = format_cues([SrtCue(i + 1, f["start"], f["end"], f["text"])
+                                for i, f in enumerate(frames)])
             Path(args.srt).write_text(render_srt(cues), encoding="utf-8")
             print(f"字幕已写出：{args.srt}")
             print("  对比参考字幕：python tools/subtitle_compare.py 参考.srt " + args.srt)

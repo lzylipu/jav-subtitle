@@ -388,7 +388,7 @@ pre.help{background:var(--field);border:1px solid var(--line);border-radius:16px
         </select></label>
         <label>断句间隔（秒）<input name="asr_split_gap" type="number" min="0.1" max="3" step="0.1" required><small>说话停顿超过这个长度就断一条。0.7 是正常换气</small></label>
         <label>单条最长秒数<input name="asr_max_cue_seconds" type="number" min="2" max="30" step="0.5" required><small>超了会在最近的句号处断开</small></label>
-        <label>单条最多个字<input name="asr_max_cue_chars" type="number" min="10" max="120" required></label>
+        <label>单条最多个字<input name="asr_max_cue_chars" type="number" min="10" max="120" required><small>默认 40：日语两行，每行约 20 字</small></label>
         <div class="chkRow">
           <label class="check"><input name="asr_word_timestamps" type="checkbox">按词对齐时间轴（强烈建议开）</label>
           <label class="check"><input name="keep_japanese_srt" type="checkbox">把日文字幕另存一份到影片旁边</label>

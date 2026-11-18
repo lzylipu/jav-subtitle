@@ -47,6 +47,9 @@ class DescribeTests(unittest.TestCase):
         self.assertAlmostEqual(d["coverage"], 0.9333, places=3)
         self.assertEqual(d["over_8s"], 1)
         self.assertEqual(d["over_12s"], 1)
+        self.assertEqual(d["gap_median_s"], 1.0)
+        self.assertEqual(d["chars_median"], 1.0)
+        self.assertAlmostEqual(d["chars_per_speech_s"], 3 / 28, places=2)
 
     def test_gap_and_overlap_detection(self):
         cues = [Cue(0.0, 2.0, "a"), Cue(5.0, 7.0, "b"), Cue(6.5, 8.0, "c")]
@@ -84,12 +87,15 @@ class StyleTests(unittest.TestCase):
         self.assertEqual(style["text_lines"], 3)
         self.assertEqual(style["lines_per_cue_median"], 1)
         self.assertEqual(style["line_chars_median"], 3)
+        self.assertEqual(style["line_columns_median"], 6)
+        self.assertEqual(style["max_line_columns"], 6)
         self.assertEqual(style["leading_gap_s"], 1.0)
 
     def test_empty_cues_have_safe_style_values(self):
         style = text_style([])
         self.assertEqual(style["text_lines"], 0)
         self.assertEqual(style["max_line_chars"], 0)
+        self.assertEqual(style["max_line_columns"], 0)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from .db import (
     load_settings, now, stage_label, today, tm_lookup, tm_store, update_job,
 )
 from .ratelimit import limiter
-from .subtitles import Cue, atomic_write, parse_srt, render_srt, target_paths
+from .subtitles import Cue, atomic_write, format_cues, parse_srt, render_srt, target_paths
 from .translation import (FatalTranslationError, MissingConfigError, build_translator,
                           cache_namespace, normalize_provider, parse_fallback,
                           translator_cache_key)
@@ -243,6 +243,8 @@ def handle_asr(job: dict, settings: Settings) -> None:
             audio.unlink(missing_ok=True)
         return
 
+    # 工作用的日文字幕保持单行：下一步翻译按整条送模型，换行会干扰译文。
+    # 真正给播放器看的日文/中文成品统一走 format_cues 两行排版。
     cues = [Cue(i, f["start"], f["end"], f["text"]) for i, f in enumerate(frames, 1)]
     rendered = render_srt(cues)
 
@@ -251,7 +253,7 @@ def handle_asr(job: dict, settings: Settings) -> None:
     atomic_write(working, rendered, overwrite=True)
     if settings.keep_japanese_srt:
         atomic_write(target_paths(Path(job["video_path"]), settings.target_language)[1],
-                     rendered, overwrite=True)
+                     render_srt(format_cues(cues)), overwrite=True)
 
     elapsed = time.time() - started
     counter_add("asr.media_seconds", duration or 0.0)
@@ -355,7 +357,8 @@ def handle_translate(job: dict, settings: Settings) -> None:
         update_job(job["id"], progress=70 + int(done_ratio * 29),
                    message=f"翻译 {start + len(chunk)}/{total} 条（缓存命中 {hits}）")
 
-    final_cues = [Cue(i, c.start, c.end, text) for i, (c, text) in enumerate(zip(cues, translated), 1)]
+    final_cues = format_cues([Cue(i, c.start, c.end, text)
+                              for i, (c, text) in enumerate(zip(cues, translated), 1)])
     atomic_write(target, render_srt(final_cues), overwrite=settings.overwrite_existing)
     elapsed = time.time() - started
     counter_add("translate.wall_seconds", elapsed)

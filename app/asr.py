@@ -314,17 +314,31 @@ def _run_engine(model: Any, batched: Any, path: Path, kwargs: dict[str, Any],
         return model.transcribe(str(path), **kwargs)
 
 
-def _collect_words(segments: Iterable[Any], offset: float = 0.0) -> list[dict[str, Any]]:
-    """把带词级时间戳的 segment 摊平成词表，并补上窗口偏移。"""
+def _collect_words(segments: Iterable[Any], offset: float = 0.0,
+                   limit: float | None = None) -> list[dict[str, Any]]:
+    """把带词级时间戳的 segment 摊平成词表，并补上窗口偏移。
+
+    ``limit`` 是当前窗口的绝对结束时间。Whisper 在长静音/音乐上偶尔会把
+    词的时间戳吐到窗口之外（实测 EBOD-769 尾部多出 8 分钟），必须在拼回
+    整条时间轴时就夹掉，否则字幕会跑到片尾之后。
+    """
     words: list[dict[str, Any]] = []
     for segment in segments:
         for word in (getattr(segment, "words", None) or []):
             token = (word.word or "").strip()
             if not token:
                 continue
+            start = float(word.start) + offset
+            end = float(word.end) + offset
+            if limit is not None:
+                if start >= limit - 0.01:
+                    continue
+                end = min(end, limit)
+            if end <= start:
+                continue
             words.append({
-                "start": float(word.start) + offset,
-                "end": float(word.end) + offset,
+                "start": start,
+                "end": end,
                 "text": token,
                 "prob": float(getattr(word, "probability", 1.0)),
             })
@@ -437,7 +451,9 @@ def _collect_windowed(model: Any, batched: Any, audio: Path, duration: float,
                 _slice_audio(audio, path, start, length)
             segments, info = _run_engine(model, batched, path, kwargs, batch_size)
             language = language or getattr(info, "language", "") or ""
-            incoming = _collect_words(segments, 0.0 if whole else start)
+            incoming = _collect_words(
+                segments, 0.0 if whole else start,
+                limit=duration if whole else start + length)
             merge_words(words, incoming)
             if progress:
                 progress(min((start + length) / duration, 1.0),
@@ -608,8 +624,12 @@ def transcribe_audio(
         if tmpdir is not None:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    # 重切之后再收一遍尾巴：模型会把短句的时间拉得很长，字幕就挂在那儿没人说话
-    result = drop_repeats(trim_cues(result))
+    # 重切之后再收一遍尾巴：模型会把短句的时间拉得很长，字幕就挂在那儿没人说话。
+    # 收完再补一点「停留时间」：参考字幕相邻两条大多首尾相接，而按词边界
+    # 直接落轴会留下 2~4 秒黑屏（观众会以为字幕断了）。最多向后补 1.5 秒，
+    # 且不越过下一条的起点、不超过 8 秒上限。
+    result = pad_cue_tails(drop_repeats(trim_cues(result)))
+    result = clamp_cues(result, duration)
     return result, language_out, duration
 
 
@@ -704,6 +724,42 @@ def trim_cues(segments: list[dict[str, Any]], max_cps: float = 2.5,
         if end <= start:
             continue
         out.append({"start": start, "end": end, "text": text})
+    return out
+
+
+def clamp_cues(segments: list[dict[str, Any]], duration: float) -> list[dict[str, Any]]:
+    """把字幕严格夹在媒体时长内：丢掉起点已经在片尾之后的幻觉条。
+
+    词级时间戳在窗口边界偶尔会越过音轨末尾（实测 EBOD-769 多出 492 秒），
+    不夹的话最后十几条字幕会落在播放器时间轴之外。
+    """
+    if duration <= 0:
+        return segments
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        start = min(float(seg["start"]), duration)
+        end = min(float(seg["end"]), duration)
+        if start >= duration - 0.01 or end <= start:
+            continue
+        out.append({**seg, "start": start, "end": end})
+    return out
+
+
+def pad_cue_tails(segments: list[dict[str, Any]], max_pad: float = 1.5,
+                  max_seconds: float = 8.0) -> list[dict[str, Any]]:
+    """把字幕结尾向静音区延长一点，避免相邻两句之间闪黑屏。
+
+    只延后、不提前；最多延后 ``max_pad`` 秒，不越过下一条的起点（留 40ms
+    安全间隔），整条时长仍不超过 ``max_seconds``。最后一条也可以补
+    ``max_pad``，让片尾字幕不要戛然而止。
+    """
+    out = [dict(seg) for seg in segments]
+    for index, seg in enumerate(out):
+        limit = min(float(seg["start"]) + max_seconds, float(seg["end"]) + max_pad)
+        if index + 1 < len(out):
+            limit = min(limit, float(out[index + 1]["start"]) - 0.04)
+        if limit > float(seg["end"]):
+            seg["end"] = round(limit, 3)
     return out
 
 

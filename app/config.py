@@ -44,7 +44,7 @@ class Settings:
     asr_split_gap: float = 0.7
     # 单条字幕最长秒数 / 字数上限，超了找句末标点断开
     asr_max_cue_seconds: float = 8.0
-    asr_max_cue_chars: int = 42
+    asr_max_cue_chars: int = 40
     # 0/1 = 关闭批推理。实测（2 vCPU）：批推理快 34%，但会把 30 句对白并成 5 条长字幕，
     # 时间轴粒度毁掉，不适合做字幕。开批推理时词级时间戳不可用，等于放弃对齐。
     asr_batch_size: int = 1
