@@ -121,8 +121,7 @@ medium 把它收回 349 条、最长 8 秒、0 条虚挂。其余四部 medium �
 - 修复提交：`191bd06`（父提交 `2d7be56`）
 - GitHub Actions：https://github.com/lzylipu/jav-subtitle/actions/runs/44422628992
   （`test` success，`build` success）
-- 新镜像：`lzylipu/jav-subtitle:latest`，版本 `3.10.3`，
-  digest `sha256:d60bd4bf66d0b9bdf0267577fcbd4ffff112d6df835afc98444b62f6aaeef98b`
+- 新镜像：`lzylipu/jav-subtitle:latest`，版本 `3.10.3`（`build-and-push` job 成功）
 - 测试机 `10.10.0.8`：`docker pull` 成功；为不改动线上容器，另起验证容器
   `jav-subtitle-verify`（端口 18131，挂载只读模型缓存与 `/mnt`）。
   `/api/health` 返回 `{"ok":true,"version":"3.10.3"}`。
