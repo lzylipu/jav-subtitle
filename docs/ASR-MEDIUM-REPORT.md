@@ -118,11 +118,19 @@ medium 把它收回 349 条、最长 8 秒、0 条虚挂。其余四部 medium �
 
 ## 6. 发布与测试机复验
 
-- 修复提交：`<fill>`
-- GitHub Actions：`<fill>`（test + build-and-push）
-- 新镜像：`lzylipu/jav-subtitle:latest`，版本 `3.10.3`，digest `<fill>`
-- 测试机 `10.10.0.8`：`docker pull` → 重建容器 → `/api/health` 返回 `3.10.3`
-- 复验样本：`<fill>`（真实对白 120 秒，medium），输出两行、`>8s=0`、行宽 ≤44 列
+- 修复提交：`191bd06`（父提交 `2d7be56`）
+- GitHub Actions：https://github.com/lzylipu/jav-subtitle/actions/runs/44422628992
+  （`test` success，`build` success）
+- 新镜像：`lzylipu/jav-subtitle:latest`，版本 `3.10.3`，
+  digest `sha256:d60bd4bf66d0b9bdf0267577fcbd4ffff112d6df835afc98444b62f6aaeef98b`
+- 测试机 `10.10.0.8`：`docker pull` 成功；为不改动线上容器，另起验证容器
+  `jav-subtitle-verify`（端口 18131，挂载只读模型缓存与 `/mnt`）。
+  `/api/health` 返回 `{"ok":true,"version":"3.10.3"}`。
+- 复验样本：`IPZZ-323` 第 240～360 秒，medium / int8 / 2 线程 / 无缓存。
+  8 条，单条中位 4.16 秒、最长 7.24 秒、`>8s=0`；8 条中 4 条为两行，
+  行宽 P95 30 列、最大 30 列，条间空档中位 3.38 秒、首尾相接 42.9%。
+  产物：`artifacts/medium-20261119/verify-120.srt`。
+- 线上容器 `jav-subtitle` 仍是 `v3.10.2`，未执行 stop/rm；待用户确认后再切换。
 
 ## 7. 诚实边界
 
